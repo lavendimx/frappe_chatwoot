@@ -12,7 +12,16 @@ def set_inbox_from_user_permission(doc, method):
 	a un inbox_id distinto al asignado al usuario.
 	"""
 	if frappe.session.user in ("Administrator", "Guest"):
-		return  # Administrator = worker de ingesta y API interna; ya manda el inbox_id correcto
+		return  # Administrator: acceso total historico
+
+	# Personal interno de lavendi.mx (System Manager) y el usuario de servicio del
+	# worker de ingesta: pueden crear KB Sources para cualquier inbox_id, igual que
+	# Administrator. Necesario desde que se roto la API key de Administrator hacia
+	# el usuario dedicado agente-ia@lavendi.mx -- sin esto nadie de adentro podia
+	# dar de alta conocimiento. Los clientes del portal (rol "Cliente KB", Website
+	# User, sin System Manager) SI siguen forzados por el bloque de abajo.
+	if "System Manager" in frappe.get_roles():
+		return
 
 	allowed = frappe.get_all(
 		"User Permission",
