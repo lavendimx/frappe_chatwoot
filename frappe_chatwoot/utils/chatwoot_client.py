@@ -694,3 +694,15 @@ def get_profile() -> dict:
         )
         raise ChatwootAPIError(f"Chatwoot: {detail}" if detail else f"Chatwoot /profile returned {resp.status_code}")
     return resp.json()
+
+
+# Añadido por lavendi.mx (fork sofía) — accesor de inboxes.
+#
+# GET /inboxes devuelve {"payload": [...]} (sin envoltorio "data", igual que
+# /contacts/{id}/conversations y a diferencia de /conversations). Cacheado con
+# el TTL por defecto: la lista de inboxes cambia solo al dar de alta un cliente.
+
+
+def list_inboxes() -> list[dict]:
+    data = _get("/inboxes")
+    return data.get("payload") or []

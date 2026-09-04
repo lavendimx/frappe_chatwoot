@@ -35,14 +35,16 @@ scheduler_events = {
 # ---------------------------------------------------------------------------
 # doc_events
 # ---------------------------------------------------------------------------
-# Intentionally empty here. Unlike frappe_whatsapp (which owns a Message
-# doctype other apps hook into), frappe_chatwoot owns no conversation/message
-# doctype at all — there is nothing of ours for another app's doc_events to
-# subscribe to, and we have no local doctype whose writes need reacting to.
-# Any CRM-side reaction (e.g. notifying an assigned user on a new inbound
-# Chatwoot message) is driven off the realtime broadcast this app emits
-# (event name: "chatwoot_message"), not off a doc_events hook.
-doc_events = {}
+# KB Source is a site-level custom doctype (Sofia RAG pipeline), not owned by
+# this app — hooked here anyway since frappe_chatwoot is the glue-code app for
+# the Sofia platform. before_insert forces inbox_id from the user's own
+# User Permission, ignoring whatever a client-facing Web Form submission sent —
+# the real tenant-isolation guarantee lives here, not in the form config.
+doc_events = {
+    "KB Source": {
+        "before_insert": "frappe_chatwoot.utils.kb_isolation.set_inbox_from_user_permission",
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Fixtures / boilerplate hook surface — none needed today.

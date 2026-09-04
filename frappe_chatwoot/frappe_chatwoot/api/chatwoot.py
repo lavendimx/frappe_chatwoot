@@ -429,3 +429,77 @@ def _webhook_authentic(settings) -> bool:
         return True
     provided = frappe.form_dict.get("token") or frappe.get_request_header("X-Chatwoot-Token") or ""
     return hmac.compare_digest(str(provided), str(token))
+
+
+# Añadido por lavendi.mx (fork sofía) — endpoint de BANDEJA.
+#
+# El upstream (hypedrive-app/frappe_chatwoot) solo resuelve conversaciones
+# ligadas a un documento de Frappe (get_conversations_for_contact). Para la
+# vista "Conversaciones" dentro del SPA de CRM necesitamos lo contrario: la
+# bandeja completa de la cuenta, como la ve un agente en GHL, sin partir de un
+# Lead/Deal. cw.list_conversations ya existe en el cliente; aquí solo se expone
+# con el mismo gate de roles y se aplana la forma para la UI.
+
+
+@frappe.whitelist()
+def list_inboxes() -> list[dict]:
+    """Inboxes de la cuenta (uno por cliente/canal). Sirve para el filtro de la
+    bandeja y para etiquetar cada conversación con su origen."""
+    validate_role()
+    if not is_chatwoot_enabled():
+        return []
+    return [
+        {
+            "id": inbox.get("id"),
+            "name": inbox.get("name"),
+            "channel_type": inbox.get("channel_type"),
+        }
+        for inbox in cw.list_inboxes()
+    ]
+
+
+def _shape_conversation(conv: dict) -> dict:
+    """Aplana el objeto de Chatwoot a lo que la bandeja necesita pintar.
+
+    El preview sale de `last_non_activity_message`, que _scrub_conversation_preview
+    ya dejó en None si era una nota privada — por eso aquí se lee sin volver a
+    filtrar: la invariante de confidencialidad ya se aplicó aguas arriba."""
+    meta = conv.get("meta") or {}
+    sender = meta.get("sender") or {}
+    last = conv.get("last_non_activity_message") or {}
+    assignee = meta.get("assignee") or {}
+    return {
+        "id": conv.get("id"),
+        "inbox_id": conv.get("inbox_id"),
+        "status": conv.get("status"),
+        "unread_count": conv.get("unread_count") or 0,
+        "last_activity_at": conv.get("last_activity_at") or conv.get("timestamp"),
+        "contact": {
+            "name": sender.get("name") or sender.get("identifier") or "Sin nombre",
+            "phone": sender.get("phone_number"),
+            "email": sender.get("email"),
+            "avatar": sender.get("thumbnail") or sender.get("avatar_url") or None,
+        },
+        "assignee": (assignee.get("name") or "").strip() or None,
+        "preview": (last.get("content") or "").strip(),
+        "preview_direction": {0: "incoming", 1: "outgoing"}.get(last.get("message_type")),
+    }
+
+
+@frappe.whitelist()
+def get_conversations(inbox_id=None, status: str = "open", page=1) -> list[dict]:
+    """Bandeja completa. Degrada suave (lista vacía) si Chatwoot no está
+    configurado, mismo contrato que get_conversations_for_contact."""
+    validate_role()
+    if not is_chatwoot_enabled():
+        return []
+    if status not in ("open", "resolved", "pending", "snoozed", "all"):
+        frappe.throw("status inválido")
+    conversations = cw.list_conversations(
+        inbox_id=frappe.utils.cint(inbox_id) or None,
+        status=status,
+        page=frappe.utils.cint(page) or 1,
+    )
+    shaped = [_shape_conversation(c) for c in conversations]
+    shaped.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
+    return shaped
