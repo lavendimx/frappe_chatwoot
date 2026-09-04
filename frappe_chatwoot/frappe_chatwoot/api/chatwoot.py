@@ -221,9 +221,13 @@ def get_new_messages(conversation_id: int, since_id: int = None) -> dict:
 
 
 @frappe.whitelist()
-def send_message(conversation_id: int, content: str) -> dict:
+def send_message(conversation_id: int, content: str, inbox_id: int = None) -> dict:
     """Role-gated only — see get_messages' docstring on why reference-doc access
-    must be bound by the caller (crm.api.chatwoot._validate_conversation_ownership)."""
+    must be bound by the caller (crm.api.chatwoot._validate_conversation_ownership).
+
+    lavendi.mx: cada respuesta humana desde aquí pausa el agente IA en esta
+    conversación (ver frappe_chatwoot.api.agentes) — un humano que interviene
+    no debe competir con el bot en la siguiente respuesta del contacto."""
     validate_role()
     if not is_chatwoot_enabled():
         frappe.throw("Chatwoot integration is not enabled")
@@ -231,7 +235,25 @@ def send_message(conversation_id: int, content: str) -> dict:
         frappe.throw("Message content cannot be empty")
     conversation_id = frappe.utils.cint(conversation_id)
     result = cw.create_message(conversation_id, content.strip())
+    _pause_conversation(conversation_id, inbox_id)
     return result
+
+
+def _pause_conversation(conversation_id: int, inbox_id: int = None) -> None:
+    if frappe.db.exists("Chatwoot Pausa", {"conversation_id": conversation_id}):
+        return
+    if inbox_id is None:
+        try:
+            inbox_id = cw.get_conversation(conversation_id).get("inbox_id")
+        except cw.ChatwootAPIError:
+            inbox_id = None
+    frappe.get_doc({
+        "doctype": "Chatwoot Pausa",
+        "conversation_id": conversation_id,
+        "inbox_id": str(inbox_id) if inbox_id else "",
+        "paused_by": frappe.session.user,
+        "paused_at": frappe.utils.now_datetime(),
+    }).insert(ignore_permissions=True)
 
 
 @frappe.whitelist()
@@ -483,6 +505,10 @@ def _shape_conversation(conv: dict) -> dict:
         "assignee": (assignee.get("name") or "").strip() or None,
         "preview": (last.get("content") or "").strip(),
         "preview_direction": {0: "incoming", 1: "outgoing"}.get(last.get("message_type")),
+        # lavendi.mx: si el agente IA está pausado en esta conversación (ver
+        # frappe_chatwoot.api.agentes) — la bandeja lo marca para que quede
+        # claro quién está respondiendo antes de escribir encima.
+        "agent_paused": bool(frappe.db.exists("Chatwoot Pausa", {"conversation_id": conv.get("id")})),
     }
 
 
