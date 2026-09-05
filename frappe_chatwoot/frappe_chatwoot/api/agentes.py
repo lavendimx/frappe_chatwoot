@@ -20,12 +20,12 @@ from frappe_chatwoot.frappe_chatwoot.api.chatwoot import validate_role
 @frappe.whitelist()
 def get_active_agentes() -> dict:
     """Forma idéntica a agente-ia/config/clients.json: {inbox_id: {name, provider,
-    model, systemPrompt}}. Sin gate de rol — la llama agente-ia con API key de
-    servicio, no un usuario humano navegando Sofía."""
+    model, systemPrompt, calendarId}}. Sin gate de rol — la llama agente-ia con API
+    key de servicio, no un usuario humano navegando Sofía."""
     rows = frappe.get_all(
         "Agente IA",
         filters={"active": 1},
-        fields=["name", "client_name", "provider", "model", "system_prompt"],
+        fields=["name", "client_name", "provider", "model", "system_prompt", "calendar_id"],
     )
     return {
         row.name: {
@@ -33,6 +33,7 @@ def get_active_agentes() -> dict:
             "provider": row.provider,
             "model": row.model,
             "systemPrompt": row.system_prompt,
+            "calendarId": row.calendar_id or None,
         }
         for row in rows
     }
