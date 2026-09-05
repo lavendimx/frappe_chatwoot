@@ -25,7 +25,7 @@ def get_active_agentes() -> dict:
     rows = frappe.get_all(
         "Agente IA",
         filters={"active": 1},
-        fields=["name", "client_name", "provider", "model", "system_prompt", "calendar_id"],
+        fields=["name", "client_name", "provider", "model", "system_prompt", "calendar_id", "shadow_mode"],
     )
     return {
         row.name: {
@@ -34,6 +34,7 @@ def get_active_agentes() -> dict:
             "model": row.model,
             "systemPrompt": row.system_prompt,
             "calendarId": row.calendar_id or None,
+            "shadowMode": bool(row.shadow_mode),
         }
         for row in rows
     }
