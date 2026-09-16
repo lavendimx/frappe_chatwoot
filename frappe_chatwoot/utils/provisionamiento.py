@@ -14,14 +14,37 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    sitio sin erpnext se quedaria sin NINGUN campo. Viven en `fixtures/erpnext/` y
    se importan aqui solo si erpnext esta instalado.
 
+3. **Marca de la plataforma**: un sitio nuevo nace diciendo "Frappe" y sin logo
+   (el SPA del CRM referencia `/files/sofia-logo.png`, que sin el archivo sale
+   roto). Aqui se copian los PNG que viajan con el app y se llena `Website
+   Settings` — solo si el sitio sigue en el default, para no pisar marca propia.
+
+4. **Usuario de servicio del agente**: `agente-ia@lavendi.mx` es con quien el
+   proceso Node se autentica contra CADA sitio. Se crea si falta; su API key NO
+   se genera aqui (una key nueva romperia al agente que ya la tiene en su .env) —
+   eso lo hace a mano `asegurar_usuario_servicio()`.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
 """
 
 import os
+import shutil
 
 import frappe
+
+USUARIO_SERVICIO = "agente-ia@lavendi.mx"
+
+# Marca de la plataforma (mismos valores que crm.lavendi.mx). `splash_image` es la
+# pantalla post-login; `favicon` la pestana; `app_logo` el logo del login/menu.
+BRANDING = {
+    "app_name": "Sofía GPT by lavendi.mx",
+    "app_logo": "/files/sofia-logo.png",
+    "splash_image": "/files/sofia-logo.png",
+    "favicon": "/files/sofia-favicon.png",
+}
+ARCHIVOS_MARCA = ("sofia-logo.png", "sofia-favicon.png")
 
 ETAPAS_A_BORRAR = [
     "Futuras",
@@ -43,6 +66,8 @@ def ajustar_sitio():
         _corregir_typo,
         aplicar_fixtures_erpnext,
         deduplicar_web_form_fields,
+        _branding_plataforma,
+        _usuario_servicio_agente,
     ):
         try:
             paso()
@@ -116,3 +141,76 @@ def deduplicar_web_form_fields():
         )
         for name in sobrantes:
             frappe.db.delete("Web Form Field", {"name": name})
+
+
+def _branding_plataforma():
+    """Marca de la plataforma en un sitio nuevo. Ver el docstring del modulo.
+
+    Los PNG viajan dentro del app (`public/images/`) y se copian a `public/files/`
+    del sitio, que es de donde el SPA del CRM los pide. No hace falta crear el
+    registro `File`: Frappe sirve `/files/*` del disco (verificado 2026-09-16).
+    """
+    origen = os.path.join(frappe.get_app_path("frappe_chatwoot"), "public", "images")
+    destino = frappe.get_site_path("public", "files")
+    os.makedirs(destino, exist_ok=True)
+    for nombre in ARCHIVOS_MARCA:
+        src = os.path.join(origen, nombre)
+        if not os.path.exists(src):
+            continue
+        dst = os.path.join(destino, nombre)
+        if not os.path.exists(dst):
+            shutil.copyfile(src, dst)
+
+    ws = frappe.get_single("Website Settings")
+    # Solo si nadie lo personalizo: un cliente con marca propia no se pisa.
+    if (ws.app_name or "").strip() in ("", "Frappe"):
+        for campo, valor in BRANDING.items():
+            ws.set(campo, valor)
+        ws.save(ignore_permissions=True)
+
+
+def _usuario_servicio_agente():
+    """Crea el usuario con el que el agente Node se autentica contra este sitio.
+
+    NO genera la API key a proposito: `frappe.core.doctype.user.user.generate_keys`
+    SIEMPRE regenera el `api_secret`, asi que correrlo en cada migrate rompería al
+    agente que ya tiene la key en su `.env`. La key se genera a mano una sola vez
+    con `asegurar_usuario_servicio()`.
+    """
+    if frappe.db.exists("User", USUARIO_SERVICIO):
+        return
+    doc = frappe.get_doc(
+        {
+            "doctype": "User",
+            "email": USUARIO_SERVICIO,
+            "first_name": "Agente IA",
+            "user_type": "System User",
+            "send_welcome_email": 0,
+            "roles": [{"role": "System Manager"}],
+        }
+    )
+    doc.insert(ignore_permissions=True)
+
+
+def asegurar_usuario_servicio():
+    """Punto de entrada MANUAL (no `after_migrate`).
+
+        bench --site <sitio> execute frappe_chatwoot.utils.provisionamiento.asegurar_usuario_servicio
+
+    Crea el usuario de servicio si falta y genera su API key SOLO si no tiene.
+    Devuelve la key para copiarla al `FRAPPE_SITES` del `.env` del agente. Nunca
+    pisa una key existente: en el sitio compartido es un no-op.
+    """
+    _usuario_servicio_agente()
+    frappe.db.commit()
+    doc = frappe.get_doc("User", USUARIO_SERVICIO)
+    generada = False
+    if not doc.api_key:
+        from frappe.core.doctype.user.user import generate_keys
+
+        claves = generate_keys(USUARIO_SERVICIO)
+        frappe.db.commit()
+        doc.reload()
+        generada = True
+        return {"usuario": USUARIO_SERVICIO, "generada": generada, **claves}
+    return {"usuario": USUARIO_SERVICIO, "generada": generada, "api_key": doc.api_key}
