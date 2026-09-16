@@ -1,0 +1,50 @@
+[
+ {
+  "default_value": null,
+  "doc_type": "Customer",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "naming_series",
+  "is_system_generated": 1,
+  "modified": "2026-09-10 09:04:57.954544",
+  "module": null,
+  "name": "Customer-naming_series-reqd",
+  "property": "reqd",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "0"
+ },
+ {
+  "default_value": null,
+  "doc_type": "Customer",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "naming_series",
+  "is_system_generated": 1,
+  "modified": "2026-09-10 09:04:58.219176",
+  "module": null,
+  "name": "Customer-naming_series-hidden",
+  "property": "hidden",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ },
+ {
+  "default_value": null,
+  "doc_type": "Customer",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "ghl_contact_id",
+  "is_system_generated": 1,
+  "modified": "2026-09-14 13:59:47.609562",
+  "module": null,
+  "name": "Customer-ghl_contact_id-search_index",
+  "property": "search_index",
+  "property_type": "Check",
+  "row_name": null,
+  "value": "1"
+ }
+]

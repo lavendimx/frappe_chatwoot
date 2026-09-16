@@ -174,8 +174,16 @@ DOCTYPES_EXTENDIDOS = [
     "CRM Task",
     "CRM Organization",
     "Contact",
-    "Customer",
 ]
+
+# Doctypes que solo existen si erpnext esta instalado. Sus campos, property
+# setters y permisos NO pueden vivir en los fixtures normales:
+# frappe/utils/fixtures.py envuelve el ARCHIVO COMPLETO en un try/except y lo
+# salta entero si UN doctype falta ("Skipping fixture syncing from the file
+# custom_field.json. Reason: DocType X not found"). Meter Customer ahi dejaria a
+# un sitio sin erpnext sin NINGUN campo. Viven en fixtures/erpnext/ y los
+# importa utils/provisionamiento.py solo si erpnext esta instalado.
+DOCTYPES_ERPNext = ["Customer"]
 
 fixtures = [
     {"dt": "Custom Field", "filters": [["dt", "in", DOCTYPES_PROPIOS + DOCTYPES_EXTENDIDOS]]},
@@ -184,9 +192,8 @@ fixtures = [
         "filters": [["doc_type", "in", DOCTYPES_PROPIOS + DOCTYPES_EXTENDIDOS + ["Assignment Rule", "FCRM Note"]]],
     },
     {"dt": "Translation", "filters": [["language", "=", "es"]]},
-    {"dt": "Custom DocPerm", "filters": [["parent", "in", ["CRM Deal", "Customer", "Payment Entry", "Sales Invoice", "User"]]]},
+    {"dt": "Custom DocPerm", "filters": [["parent", "in", ["CRM Deal", "User"]]]},
     {"dt": "Web Form", "filters": [["module", "=", "Custom"]]},
-    {"dt": "Web Form Field", "filters": [["parent", "in", ["base-de-conocimiento", "solicita-una-cotización-ahora"]]]},
 ]
 
 # Datos de catalogo del embudo y de origen/perdida — no son doctypes propios,
@@ -206,5 +213,5 @@ fixtures += [
 # en ingles; el fixture agrega/actualiza las 16 de lavendi.mx pero dejaria las
 # 6 nativas que produccion borro. Ver utils/provisionamiento.py.
 after_migrate = [
-    "frappe_chatwoot.utils.provisionamiento.ajustar_embudo",
+    "frappe_chatwoot.utils.provisionamiento.ajustar_sitio",
 ]
