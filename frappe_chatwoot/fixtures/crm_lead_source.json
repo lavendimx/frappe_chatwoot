@@ -1,0 +1,202 @@
+[
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.073989",
+  "name": "Email",
+  "source_name": "Email"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.074722",
+  "name": "Existing Customer",
+  "source_name": "Existing Customer"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.075507",
+  "name": "Reference",
+  "source_name": "Reference"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.084010",
+  "name": "Advertisement",
+  "source_name": "Advertisement"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.084745",
+  "name": "Cold Calling",
+  "source_name": "Cold Calling"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.085453",
+  "name": "Exhibition",
+  "source_name": "Exhibition"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.086163",
+  "name": "Supplier Reference",
+  "source_name": "Supplier Reference"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.086916",
+  "name": "Mass Mailing",
+  "source_name": "Mass Mailing"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.087607",
+  "name": "Customer's Vendor",
+  "source_name": "Customer's Vendor"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.088316",
+  "name": "Campaign",
+  "source_name": "Campaign"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.089144",
+  "name": "Walk In",
+  "source_name": "Walk In"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.089907",
+  "name": "Facebook",
+  "source_name": "Facebook"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.090650",
+  "name": "Website",
+  "source_name": "Website"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-04 03:13:22.091325",
+  "name": "Web Form",
+  "source_name": "Web Form"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.933910",
+  "name": "Calculadora de ventas",
+  "source_name": "Calculadora de ventas"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.940136",
+  "name": "Chat Widget",
+  "source_name": "Chat Widget"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.940919",
+  "name": "Curso individual online",
+  "source_name": "Curso individual online"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.949647",
+  "name": "Google Ads",
+  "source_name": "Google Ads"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.950386",
+  "name": "Link de pago",
+  "source_name": "Link de pago"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.951088",
+  "name": "Proyecto plataforma de compras",
+  "source_name": "Proyecto plataforma de compras"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.951793",
+  "name": "Sitio lavendi.mx",
+  "source_name": "Sitio lavendi.mx"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.952513",
+  "name": "Videollamada",
+  "source_name": "Videollamada"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.953174",
+  "name": "WhatsApp",
+  "source_name": "WhatsApp"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.941644",
+  "name": "Formulario de cotización",
+  "source_name": "Formulario de cotización"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-11 06:30:45.834395",
+  "name": "Formulario web",
+  "source_name": "Formulario web"
+ }
+]

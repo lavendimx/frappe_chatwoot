@@ -1,0 +1,90 @@
+[
+ {
+  "description": "The prospect found the pricing to be too high or not competitive.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Pricing",
+  "modified": "2026-09-04 03:13:22.099525",
+  "name": "Pricing"
+ },
+ {
+  "description": "The prospect chose a competitor's product or service.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Competition",
+  "modified": "2026-09-04 03:13:22.100256",
+  "name": "Competition"
+ },
+ {
+  "description": "The prospect did not have the budget to proceed with the purchase.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Budget Constraints",
+  "modified": "2026-09-04 03:13:22.101128",
+  "name": "Budget Constraints"
+ },
+ {
+  "description": "The prospect felt that the product or service was missing key features they needed.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Missing Features",
+  "modified": "2026-09-04 03:13:22.109678",
+  "name": "Missing Features"
+ },
+ {
+  "description": "The sales process took too long, leading to loss of interest.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Long Sales Cycle",
+  "modified": "2026-09-04 03:13:22.111839",
+  "name": "Long Sales Cycle"
+ },
+ {
+  "description": "The prospect was not the decision-maker and could not proceed.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "No Decision-Maker",
+  "modified": "2026-09-04 03:13:22.114443",
+  "name": "No Decision-Maker"
+ },
+ {
+  "description": "The prospect did not respond to follow-ups.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Unresponsive Prospect",
+  "modified": "2026-09-04 03:13:22.117549",
+  "name": "Unresponsive Prospect"
+ },
+ {
+  "description": "The prospect was not a good fit for the product or service.",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Poor Fit",
+  "modified": "2026-09-04 03:13:22.120512",
+  "name": "Poor Fit"
+ },
+ {
+  "description": "",
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Other",
+  "modified": "2026-09-04 03:13:22.122519",
+  "name": "Other"
+ },
+ {
+  "description": null,
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "Sin motivo registrado (migrado de GHL)",
+  "modified": "2026-09-06 08:25:35.619291",
+  "name": "Sin motivo registrado (migrado de GHL)"
+ },
+ {
+  "description": null,
+  "docstatus": 0,
+  "doctype": "CRM Lost Reason",
+  "lost_reason": "No respondió",
+  "modified": "2026-09-15 10:47:09.303597",
+  "name": "No respondió"
+ }
+]

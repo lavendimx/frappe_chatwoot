@@ -133,3 +133,68 @@ website_route_rules = [
 after_request = [
     "frappe_chatwoot.frappe_chatwoot.api.formularios.csp_embebido",
 ]
+
+# ---------------------------------------------------------------------------
+# Fixtures — la configuracion que vive en la DB y que debe viajar a cada sitio
+# ---------------------------------------------------------------------------
+# Los 15 doctypes propios ya viajan como codigo (frappe_chatwoot/doctype/*).
+# Lo que sigue es lo que NO es doctype y hasta hoy solo existia en la DB de
+# crm.lavendi.mx: campos, property setters, traducciones, permisos y los Web
+# Forms del modulo de formularios. Con esto, un sitio nuevo recibe todo con
+# `bench --site <sitio> install-app frappe_chatwoot` + `bench migrate`.
+#
+# Los filtros son deliberadamente acotados: NO se exportan los custom fields /
+# property setters que ya genera erpnext o la propia app crm al instalarse
+# (p. ej. Contact.is_billing_contact, Print Settings.*, los ~96 property
+# setters de doctypes de ERPNext), porque esos se recrean solos y duplicarlos
+# como fixture haria que un sitio de cliente los pisara con nuestra copia.
+
+DOCTYPES_PROPIOS = [
+    "Agente IA",
+    "Chatwoot Pausa",
+    "KB Inbox",
+    "KB Source",
+    "Mensaje Programado",
+    "Mensaje Programado Adjunto",
+    "Plantilla",
+    "Reunion Agendada",
+    "Secuencia",
+    "Secuencia Inscripcion",
+    "Secuencia Paso",
+    "Sofia Push Settings",
+    "Sofia Push Subscription",
+    "Solicitud Web",
+    "Stripe Settings",
+]
+
+# Doctypes de terceros (crm) que extendimos con campos propios.
+DOCTYPES_EXTENDIDOS = [
+    "CRM Deal",
+    "CRM Lead",
+    "CRM Task",
+    "CRM Organization",
+    "Contact",
+    "Customer",
+]
+
+fixtures = [
+    {"dt": "Custom Field", "filters": [["dt", "in", DOCTYPES_PROPIOS + DOCTYPES_EXTENDIDOS]]},
+    {
+        "dt": "Property Setter",
+        "filters": [["doc_type", "in", DOCTYPES_PROPIOS + DOCTYPES_EXTENDIDOS + ["Assignment Rule", "FCRM Note"]]],
+    },
+    {"dt": "Translation", "filters": [["language", "=", "es"]]},
+    {"dt": "Custom DocPerm", "filters": [["parent", "in", ["CRM Deal", "Customer", "Payment Entry", "Sales Invoice", "User"]]]},
+    {"dt": "Web Form", "filters": [["module", "=", "Custom"]]},
+    {"dt": "Web Form Field", "filters": [["parent", "in", ["base-de-conocimiento", "solicita-una-cotización-ahora"]]]},
+]
+
+# Datos de catalogo del embudo y de origen/perdida — no son doctypes propios,
+# son REGISTROS de doctypes de crm que el equipo curó (16 etapas, 25 origenes,
+# 11 razones de perdida). Sin esto un sitio nuevo nace con las 22 etapas en
+# ingles de frappe/crm y sin los origenes de lavendi.mx.
+fixtures += [
+    {"dt": "CRM Deal Status"},
+    {"dt": "CRM Lead Source"},
+    {"dt": "CRM Lost Reason"},
+]

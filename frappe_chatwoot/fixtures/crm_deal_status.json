@@ -1,0 +1,178 @@
+[
+ {
+  "color": "green",
+  "deal_status": "Won",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.570169",
+  "name": "Won",
+  "position": 20,
+  "probability": 100.0,
+  "type": "Won"
+ },
+ {
+  "color": "red",
+  "deal_status": "Lost",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.571256",
+  "name": "Lost",
+  "position": 21,
+  "probability": 0.0,
+  "type": "Lost"
+ },
+ {
+  "color": "gray",
+  "deal_status": "Oportunidades futuras",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.533800",
+  "name": "Oportunidades futuras",
+  "position": 1,
+  "probability": 7.69,
+  "type": "Open"
+ },
+ {
+  "color": "blue",
+  "deal_status": "Contactado",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.543685",
+  "name": "Contactado",
+  "position": 3,
+  "probability": 23.08,
+  "type": "Ongoing"
+ },
+ {
+  "color": "blue",
+  "deal_status": "Cotizado",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.544529",
+  "name": "Cotizado",
+  "position": 4,
+  "probability": 30.77,
+  "type": "Ongoing"
+ },
+ {
+  "color": "cyan",
+  "deal_status": "Videollamada de cierre",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.556039",
+  "name": "Videollamada de cierre",
+  "position": 5,
+  "probability": 38.46,
+  "type": "Ongoing"
+ },
+ {
+  "color": "teal",
+  "deal_status": "1er Seguimiento",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.556948",
+  "name": "1er Seguimiento",
+  "position": 6,
+  "probability": 46.15,
+  "type": "Ongoing"
+ },
+ {
+  "color": "teal",
+  "deal_status": "2do Seguimiento",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.557824",
+  "name": "2do Seguimiento",
+  "position": 7,
+  "probability": 53.85,
+  "type": "Ongoing"
+ },
+ {
+  "color": "orange",
+  "deal_status": "3er Seguimiento",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.558724",
+  "name": "3er Seguimiento",
+  "position": 8,
+  "probability": 61.54,
+  "type": "Ongoing"
+ },
+ {
+  "color": "orange",
+  "deal_status": "4to Seguimiento",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.559646",
+  "name": "4to Seguimiento",
+  "position": 9,
+  "probability": 69.23,
+  "type": "Ongoing"
+ },
+ {
+  "color": "amber",
+  "deal_status": "5to Seguimiento",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.560623",
+  "name": "5to Seguimiento",
+  "position": 10,
+  "probability": 76.92,
+  "type": "Ongoing"
+ },
+ {
+  "color": "amber",
+  "deal_status": "6to Seguimiento",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.561582",
+  "name": "6to Seguimiento",
+  "position": 11,
+  "probability": 92.31,
+  "type": "Ongoing"
+ },
+ {
+  "color": "yellow",
+  "deal_status": "Negociaciones",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.562636",
+  "name": "Negociaciones",
+  "position": 12,
+  "probability": 84.62,
+  "type": "Ongoing"
+ },
+ {
+  "color": "violet",
+  "deal_status": "Temporal",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.563621",
+  "name": "Temporal",
+  "position": 13,
+  "probability": 92.31,
+  "type": "On Hold"
+ },
+ {
+  "color": "purple",
+  "deal_status": "Seguimiento SGPT/Ads iniciado",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.564583",
+  "name": "Seguimiento SGPT/Ads iniciado",
+  "position": 14,
+  "probability": 92.31,
+  "type": "Ongoing"
+ },
+ {
+  "color": "gray",
+  "deal_status": "Lead",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.542598",
+  "name": "Lead",
+  "position": 2,
+  "probability": 15.38,
+  "type": "Open"
+ }
+]
