@@ -1,0 +1,1084 @@
+{
+ "plantillas": [
+  {
+   "titulo": "(Webinar)",
+   "ghl_id": "mkkP3uEOhRqy4iucv3Z9",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*¿Cómo logramos duplicar tus ventas en 3 meses o menos con nuestro sistema de ventas en internet?*\nhttps://www.youtube.com/watch?v=1eSTr5KQVq0",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-014.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F06ed7b6c-6595-49f9-9800-ca11576b58c5.jpg?alt=media&token=c22598a1-4b43-4d53-9264-552526250c07",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er Seguimiento Google Ads / EGT",
+   "ghl_id": "Kf8XhcYrHV5e0DxNMAfP",
+   "canal": "WhatsApp",
+   "categoria": "EGT",
+   "texto": "*¿Cómo hacemos Google Ads en lavendimx?*\nhttps://youtu.be/rcC7KukI6po",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-065.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fca09fc22-8034-4854-a53b-80f95a446859.jpeg?alt=media&token=8251aba0-ed1a-4a7b-b3b2-2d00f59b3a26",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er. Seg SofÍA GPT",
+   "ghl_id": "O8mZujeByKhsMcsrtVSl",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "Hola {{contact.first_name}} 🙂,\n\n Muchos equipos como el tuyo enfrentan olvidos en el seguimiento, baja productividad y pérdida de ventas. *Sofía GPT responde 24/7*.\n\n*¿Te gustaría ver cómo puede transformar tu gestión de ventas?*",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-036.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F54f33db3-31bd-4a7a-8843-52c8633ff61a.jpeg?alt=media&token=8437df67-e74a-48cd-bb2b-67ffc4f69bff",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er. Seg. PVP (Videollamada)",
+   "ghl_id": "mLXTEtEqCB7TzQC58AcL",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "*¿Cómo logramos equipos de ventas que dan resultados sobresalientes?*\nhttps://youtube.com/shorts/4gflvipUWOQ\n\n¿Qué te parece si *programamos una videollamada* para conversar de manera detallada sobre la cotización que te enviamos? 💻 ✅",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-040.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F63d01910-74ff-4bc3-8ebf-7f501f44b9e6.png?alt=media&token=a4f4eef1-22bc-4ca7-aec3-01974c576458",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er. Seg. PWP",
+   "ghl_id": "1UVFOn1B6YsN2F7zvcL6",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "¿Cómo hacemos diseño web en lavendimx?\nhttps://youtube.com/shorts/RUtGOS8JXiE",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-042.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fa3a9ac26-82ab-4b16-822a-11c8664fdb65.png?alt=media&token=2adfbd0a-cf21-4622-ad7e-ef9c6b04dac3",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "2do seg Google Ads / EGT",
+   "ghl_id": "8ZOE84GR2S91h0CHTp1P",
+   "canal": "WhatsApp",
+   "categoria": "EGT",
+   "texto": "*Características de una campaña de Google Ads exitosa.*\nhttps://youtu.be/doHLICKIX5s",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-048.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F8146f4e9-4ab5-4a52-917e-d773e4db6587.png?alt=media&token=ac2b9816-17a9-4617-8a6a-16e3c4290512",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "2do Seg. SofÍA GPT",
+   "ghl_id": "iLAQmUNeclj2U5fMGmMI",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "{{contact.first_name}} 🙂,\n\n¿Sabías que ahora puedes tener una IA, que venda, atienda y agende naturalmente por ti?, *¡conoce a SofÍA!* 🤩 👉https://www.youtube.com/shorts/fAB7udWgGTc\n\n*¿Te gustaría agendar una videollamada para conocer mas SofÍA?*",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-031.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F376b7d76-5821-441f-8919-10bfa04479de.png?alt=media&token=5633c3c4-7520-4d18-be27-2cc94ed69978",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "2do. Seg. PVP",
+   "ghl_id": "N9TJ6bQqcS0DGLMBcfdi",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "Hola {{contact.first_name}},\n\nSi no tienes un CRM estás en desventaja frente a tus competidores. 📉\n👉 https://youtube.com/shorts/iVWbuvfi1mc?feature=share\n\n*¿Te gustaría retomar la conversación sobre tu curso-taller de ventas con nosotros?* 💻📈\n\n1️⃣ Sí.\n2️⃣ No.\n\nMuchas gracias de antemano por tu respuesta 🙏",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-015.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F0e5d321c-d0c2-40ff-9f5f-832412258a5d.png?alt=media&token=eaf0ba9e-134f-497f-b429-e05396099944",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "2do. Seg. PWP",
+   "ghl_id": "O3AlVwtC2jQYeOTCMhCf",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "Hola, {{contact.first_name}} ¿Te gustaría retomar la conversación acerca de tu proyecto con nosotros?* 😃 \n*Página Web Premium* 💻\nhttps://lavendi.mx/transformaciondigital-2",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-037.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F550d8260-2b42-4a19-8b6a-1e90a0a0a87b.png?alt=media&token=22e70fcc-ce58-4a3d-914e-156ee8cbe063",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3. Seg Google ads / EGT (reseñas)",
+   "ghl_id": "vloTUSARDlSXZkw6VP8O",
+   "canal": "WhatsApp",
+   "categoria": "EGT",
+   "texto": "Hola {{contact.first_name}}                                              \n ¿Estás aprovechando al máximo el potencial de tus campañas en Google Ads? 🤔\n\nTe compartimos lo que dicen algunos clientes que ya confiaron en lavendimx para llevar sus campañas al siguiente nivel📈https://lavendi.mx/google-ads-2",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-027.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F2a96c19b-ffb6-414f-bf31-b2452181110f.jpeg?alt=media&token=fd6f8d21-bf13-40b3-93a9-68c733caa697",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3. Seg. Sistemas de ventas en internet (reseñas)",
+   "ghl_id": "96dLqbf8xRuWbzUqHLM5",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Mira lo que dicen algunos de nuestros clientes que decidieron implementar todo el *sistema de ventas* con nosotros.\n 📈 https://lavendi.mx/ 🧩 \n\n*¿Has pensado en lo que lograrías con un sistema de ventas todo en uno?*",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-063.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fc00bbfdc-4ffa-46c0-a7ec-6e089c5eb079.jpeg?alt=media&token=6b349a7f-3040-4629-ba17-85b2d3eb7922",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3er Seg Sofía GPT",
+   "ghl_id": "hm2bixMo6xxSUuMQMMFv",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "Hola {{contact.first_name}} 🙂, \n\nSi tu equipo olvida dar seguimiento, pierde leads o no aprovecha horarios fuera de oficina, *Sofía GPT* es la solución convierte conversaciones en ventas reales. \n\n*¿Te gustaría que te mostremos cómo funciona?*",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-051.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F8e4c6529-a309-4280-aca2-f3dcf9f06e6b.jpeg?alt=media&token=7aac3738-e2cb-4125-8ac3-7123134f9968",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3er. Seg None",
+   "ghl_id": "WivDcAyHRF17WTQGGqhy",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}},\n\nSeguimos en contacto contigo para recordarte que en lavendimx, somos tus aliados para crear las soluciones que tu negocio necesita.\n\nhttps://lavendi.mx\n\n¿Cuál es el problema de tu negocio en el que te podemos ayudar hoy? 🙂",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-039.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F61b50213-64a9-42a2-b387-56cc7c3b7a78.png?alt=media&token=13283dbc-9e94-4c17-b401-48742fe75a44",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3r. Seg PWP (reseñas)",
+   "ghl_id": "QSfECBOM4PdK8UldlLdk",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "💬 Te compartimos lo que dicen quienes ya confiaron en nosotros para crear su sitio web 🙂",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-032.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F3f68f324-7b77-4f39-ada9-423307bda28c.jpeg?alt=media&token=af5f701f-18bd-4c1f-9c60-6288b5f21d18",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3r.Seg PVP (reseñas)",
+   "ghl_id": "sDab3Ry3w2RxWIqmWA5H",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "Hola {{contact.first_name}} 👋🏼,\n\nTe comparto algunas opiniones de quienes ya tomaron el curso con nosotros y han visto incrementos considerables en sus ventas 📊\n\n*¿Podemos coordinar una breve videollamada para analizar cómo podemos ayudarles con el curso taller de ventas?* 🙂",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-074.mp4",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fe5dc76b8-5360-48ec-a801-b878fd107e58.mp4?alt=media&token=e8789833-27e8-4f61-9b74-43d7c3b91702",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4. Seg. Sistema de ventas en internet (spotify)",
+   "ghl_id": "kUlJ5Ws9AHHxwOPX433A",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¿Te imaginas duplicar tus ventas en solo 3 meses? 🚀\n\n🎧 En este podcast te contamos cómo lograrlo paso a paso:\n🔗https://open.spotify.com/episode/5d9WuXk2447HxOf12TiWHp?si=PJ40Q7IeRte7slK6zA5abA\n\n¿Te gustaría que tu negocio fuera el siguiente? 💬🌐",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-021.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F15364a59-69ab-4149-a31c-a3d030ba4693.jpeg?alt=media&token=97c331dd-70e2-4262-8ea9-567bc00b85a4",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4to seg PWP",
+   "ghl_id": "PcGjfmLD8mA3kuISkIXR",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "*Funcionalidades incluídas en todos los proyectos web 🌐que realizamos en lavendimx*\n\n📈 https://youtu.be/H4oIqL4ibXI?si=A_y4S0jvMoLqlzUb",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-035.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F4ea0c69c-5f70-4738-8640-b8bc309b11a4.png?alt=media&token=84e1acca-a375-4b4b-97c4-27945441983d",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4to Seg. None (spotify)",
+   "ghl_id": "dBBGUL1Ji3mIAsN1bak0",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¿Cansad@ de probar soluciones que prometen mucho y entregan poco? 😩\n\n(EP4-T1) lavendimx -  Lo que nadie te dice antes de contratar un CRM, en el siguiente episodio escucharas como una de nuestras soluciones ayuda a los negocios a ser mas competitivos:\nhttps://open.spotify.com/episode/0j81g1fY3eLvzlPNMNVJ5X?si=ILp0AksER466poEAxlOtoQ",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-022.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F173721eb-1951-4436-a6e0-c841ac941a9c.jpeg?alt=media&token=04b9f1bc-b2e0-4876-b1df-e7734fbe2320",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4to Seg. SofÍA GPT (spotify)",
+   "ghl_id": "4WWsn4f3IKHuQCZ2GrQa",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "¿Sabías que con Sofía GPT *puedes centralizar todos tus canales (WhatsApp, Facebook, Instagram) en un solo CRM*?\n\nEsto libera a tu equipo para enfocarse en cerrar, no en recordar. *¿Quieres resultados así en tu negocio?*",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-075.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fe69e6227-3364-4394-bed7-c6ed3f04ff35.jpeg?alt=media&token=e540fc2c-74a2-4f2c-add5-d6349e88083c",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4to. Seg. Google ads / EGT (spotify)",
+   "ghl_id": "C8UJUN0tPr8fuh2kMiQr",
+   "canal": "WhatsApp",
+   "categoria": "EGT",
+   "texto": "Hola {{contact.first_name}} 😀\n\nTe comparto un episodio especial que hemos preparado en nuestro podcast 🎧:\n*Características básicas de una campaña de Google Ads exitosa*\n\nUna guía rápida pero poderosa para saber si tus campañas están realmente bien estructuradas o si estás dejando oportunidades en la mesa. \n🔗: https://open.spotify.com/episode/109FV2HJBcCMS6Qqbff6Ii?si=UWzr2DvkR7WIVRHF7boV7A",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-045.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F713ed092-9595-475a-9712-f96902177519.jpeg?alt=media&token=059bb335-8536-4468-864b-47ac8cf7e158",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4to. Seg. PVP - spotify",
+   "ghl_id": "T1XYIF5efHYnnMFDM3vg",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "Hola! {{contact.first_name}} 👋🏼,\nTe comparto un episodio de nuestro podcast🎙️sobre la importancia de una estructura de ventas adecuada ✅\n\nInfraestructura y ecosistema de ventas - lavendimx\nhttps://open.spotify.com/episode/0ncz4M6G9obC0dZk6iRHx1?si=a0aeafcb6ae64bb0\n\n¿Te gustaría conocer cómo, además del curso, diseñamos un proceso de ventas personalizado según tus objetivos y retos?\n\n1️⃣SÍ.\n2️⃣ No.",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-072.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fdf2fb69c-cf4a-42d7-8a8f-87bc74745f29.jpeg?alt=media&token=2ed8e3f8-1545-44f1-9eb7-6db6fd0f583e",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "5to Seg Todos los productos Descuento especial.",
+   "ghl_id": "i6hj0nGe14rJRjA3nBLS",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*Descuento especial* 🏷️\n\nPara algunos proyectos estamos habilitando un beneficio preferencial de descuento por tiempo limitado.\n\n*¿Te interesa conocerlo?* 🙂\n\n1️⃣ Sí.\n2️⃣ No.",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-052.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F99da13a4-bdfc-4d96-b50b-a86cab3ff063.png?alt=media&token=8961a5ab-96aa-4926-9ef7-303d65bb7139",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Acceso plan básico SGPT",
+   "ghl_id": "WxEji5Puhh085YocQBwF",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "*Hemos enviado tu acceso al plan básico de Sofía GPT CRM*\n\nHas recibido en tu email el la invitación para accesar a Sofía GPT CRM (Plan básico).\n\nTe invitamos a programar la videollamada demo para explicarte como puedes sacar el mayor provecho de esta versión en este enlace:\n\nhttps://api.sofia.lavendi.mx/widget/bookings/lavendimx\n\n¿Hay alguna información adicional que podamos proporcionarte?",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-028.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F2ee9d80f-b7ac-4e02-abb5-190e45632f3c.png?alt=media&token=1f61fd00-c14f-4a2b-bbb7-f65aabd6fb01",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Autoagendación Clientes",
+   "ghl_id": "Hxn9xW7yKHqIKdVflNuC",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "{{contact.first_name}}, ¿Qué te parece si, de acuerdo a tu disponibilidad, nos ayudas programando la videollamada en este enlace? 🙏🏼\n\n¿Cómo ves? 🙂\nhttps://api.sofia.lavendi.mx/widget/bookings/lavendimx/clientes 🗓️\n\nSi prefieres que lo hagamos nosotros, indícame un par de opciones de disponibilidad para mañana y lo checamos con mucho gusto ✅",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Autoagendación Prospectos / Leads",
+   "ghl_id": "1DeTc7ennovgniEYUrZj",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*¿Cuándo te gustaría prorgamar la videollamada?*\n\nSi prefieres, *de acuerdo a tu disponibilidad y conveniencia* puedas programar la reunión tu mismo aquí: https://api.sofia.lavendi.mx/widget/bookings/lavendimx",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Aviso de Videollamada programada",
+   "ghl_id": "ZN4hBOCOKX7nPtJeui2T",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Tu videollamada ha quedado programada, se compartieron los detalles por correo electrónico. ✅ \n\n¿Te llego correctamente?🤔",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Breve",
+   "ghl_id": "HXstQ4goll8KikW6EzVf",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hemos recibido tu mensaje, alguien de nuestro equipo estará contigo tan pronto esté disponible..⏳",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Caso de uso #1 SofÍA",
+   "ghl_id": "zXxs9gLOCvuxENcTViyI",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "¡Mira cómo trabaja SofÍA GPT!😃\nCaso de uso #1.",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-034.mp4",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F4a863297-613c-49d3-af3c-e8bb8bb063dd.mp4?alt=media&token=0e94360e-2d8b-474b-a572-926ce6bc2e60",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Caso de uso #2 SofÍA",
+   "ghl_id": "huNKhyGuC7s39JbPlTbK",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "¡Mira cómo trabaja SofÍA GPT!😃\nCaso de uso #2.",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-064.mp4",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fc0a6afc7-33e7-4fe0-958d-54795aa1e53b.mp4?alt=media&token=440eaf52-0a52-47af-9ab9-ac129d84b6f5",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Caso de uso #3 SofÍA",
+   "ghl_id": "qwrcyE4CH37iEQF9fBBg",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "¡Mira cómo trabaja SofÍA GPT!😃\nCaso de uso #3.",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-019.mp4",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F131eaf70-cc80-4591-bf10-d4fd3cc39ab2.mp4?alt=media&token=121238ab-eddd-433d-b1e4-4f7beae3c181",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Cobranza",
+   "ghl_id": "IWcUFpINPh0yxezUSQs6",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}}🙂,\n\nTe hemos enviado un correo porque recientemente finalizamos una fase de tu proyecto, derivado de esto, tenemos un saldo pendiente relacionado.\n\nFactura pendiente: {{ invoice.url }}\n\n*¿Lo recibiste correctamente?* ✉️",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Confirmación de Videollamada",
+   "ghl_id": "h7yjlsT5Iqg8kYRwiiSE",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}} 🙂, *confirmando nuestra videollamada dentro de 1 hora,* correcto? 🗓️",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Consultorio",
+   "ghl_id": "9909vHzGprcYMFmRVvF0",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*Villahermosa, Tab 🌟 Renta de Consultorio Equipado 🌟*\n \n- Zona Tabasco 2000\n- Estacionamiento\n- Disponible los días lunes, martes y sábados. 3 días por semana.\n- $3,000 MXN / mes\n- Todos los servicios incluídos.\n \n*Ubicación:* https://maps.app.goo.gl/hassrnm5P7G6w3mk7\n \n#ConsultorioEnRenta",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-061.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fb785b768-4707-4cfe-854b-6218824139c3.jpg?alt=media&token=7739dab8-74ba-4133-9d98-afc81034e951",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Costo de un equipo no profesionalizado",
+   "ghl_id": "jK6SI0wUA0Dns6RGpMOv",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*¿Cuánto le cuesta a tu empresa no tener un equipo de ventas profesionalizado definido?*\n\n*{{contact.first_name}}* no es un costo visible — pero está ahí, mes a mes. 📉 Solo en prospectos sin seguimiento y ventas perdidas por precio: más de $1.6M al año. Eso se puede resolver.\n\n*¿Te parece si conversamos al respecto?*\n\n1️⃣ Si\n2️⃣ No",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-059.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fb18bcf24-969f-4a09-9dc3-eeae97c0dae4.png?alt=media&token=1eaa37c0-7c61-4b7f-b985-5122b16ac7dc",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Cotización en proceso",
+   "ghl_id": "cTKn6fZyDkgcr3ZFiSKg",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Bien, recibimos la información de tu formulario.\n\nSabemos que es importante recibir una respuesta rápida por lo que responderemos con tu propuesta en 24 hrs hábiles máximo.\n\nSi tenemos alguna duda estaremos en contacto contigo para aclarar.\n\n*¿Te gustaría agregar o comentar algo más?*",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Cotización enviada (Obsoleta)",
+   "ghl_id": "JCSMpJLgfOi30bBEo3YU",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}},\n\nHemos enviado a tu correo la propuesta para que la puedas revisar 🙂 Por favor, si no ves nuestra cotización en tu bandeja de entrada, revisar la carpeta de spam o correo no deseado.\n\n*¿La recibiste correctamente?* 💻",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Cotización enviada - comunicado WhatsApp",
+   "ghl_id": "IriXebBUjH32CiS6A5nN",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola 👋\n\nTe hemos enviado por correo la cotización solicitada. (Si no la ves, revisa tu carpeta de spam o correos no deseado)\n\n👉 Ver cotización aquí: {{ estimate.url }}\n\n📩 *¿La recibiste correctamente?*",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Cotización enviada - PVP - Automation",
+   "ghl_id": "wDM29MfqLvwEruXIU8ND",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "Hola 👋\n\nTe hemos enviado por correo la cotización solicitada. (Si no la ves, revisa tu carpeta de spam o correos no deseado)\n\n👉 Ver cotización aquí:\nhttps://lavendi.mx/wp-content/uploads/2026/07/Profesionalizacion-de-Ventas-Premium.pdf\n\n📩 *¿La recibiste correctamente?*",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-030.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F3437088a-2d47-4400-abce-c59b15f33555.png?alt=media&token=07d4644d-e0cb-4b18-959e-fc267418ffcb",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Curso Taller de Ventas #1 en Latinoamérica",
+   "ghl_id": "d5LGcyedSSCmpTTsUHRC",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*El Curso Taller de ventas #1 de Latinoamérica al alcance de tu empresa*\n\nMuchos equipos de ventas se están quedando cortos en la aplicación de técnicas y herramientas sofisticadas que el panorama de ventas hoy demanda para alcanzar objetivos y liderar un sector o industria.\n\n*¿Te gustaría conversar más a profundiad al respecto?*\n\n 1️⃣ Sí.\n 2️⃣ No.\n\nMuchas gracias de antemano por tu respuesta ✅",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-0443b7605.mp4",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F6f7b4558-7640-466f-9b76-6c40976f5fd0.mp4?alt=media&token=e911a2c4-a258-4719-81d2-d56929622805",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Datos bancarios",
+   "ghl_id": "1YVic0udcOpMhU9Rnxhx",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*Te comparto los datos bancarios para el pago* 🙂\n\nBanco: Scotiabank\nNombre: MANUEL ALEJANDRO MORENO BARRERA\nCLABE: 044790256003235484\nTDD: 4043 1300 2176 6205\nCuenta: 25600323548",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Demo - agente de voz",
+   "ghl_id": "2SiHIiJ65rMEd1zyosof",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¡Escucha a SofÍA GPT en acción!⚡📞",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-069.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fd963c664-df9b-4999-b3c9-b5f1641b07ec.jpg?alt=media&token=01194ee2-977f-4771-805a-b747f90b6378",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Despedida",
+   "ghl_id": "3CBqSVLU1gn7XXhcL7G2",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Sigo a tus órdenes para cualquier comentario o pregunta, ¡Que sigas teniendo un gran día! 🙂",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Documentos de proveedor - lavendimx",
+   "ghl_id": "2lIGH0M75wF4SgKePbBn",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Te compartimos nuestros documentos de proveedor, aquí encontrarás todo lo necesario:\n\nhttps://drive.google.com/drive/folders/1sfYyj_IfhhNvACQKbXeyi50LGj8s3usP?usp=drive_link\n\n¿Nos compartes tu constancia de situación fiscal para la elaboración de tu factura por el 50%?",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "El importe del pago automático ha cambiado - WhatsApp",
+   "ghl_id": "jXIgqPR2X81jS1BrCHrN",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{receiverFirstName}}\n\nEl monto de la suscripción correspondiente a la factura {{invoiceName}} ha sido actualizado a un pago de {{totalAmount}}\n\nSaludos,\n{{senderFullName}}\n{{subAccountName}}",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Error en el pago de la factura - WhatsApp",
+   "ghl_id": "HkFEJheVEUaH9sZR0m0Z",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{receiverFirstName}}\n\nTu intento de pago para  {{invoiceName}} el {{currentTimestamp}}no se pudo completar. \n\nPor favor, intenta nuevamente haciendo clic en el botón Pagar factura.\n\nSaludos,\n{{senderFullName}}\n{{subAccountName}}",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Fin del día",
+   "ghl_id": "Rqdj9gq2AZL5aH8y25Y3",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Estimado cliente, el día de hoy no nos ha dado tiempo de atender tu solicitud, nuestro equipo le dará continuidad el día de mañana en el transcurso del día. Atentos a cualquier comentario o información adicional.🙂",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Formulario PVP",
+   "ghl_id": "8YXwPOXeUSHjMhIE4trS",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "https://forms.gle/inrWwFgFG5gAwucZ8",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-055.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fa47bedf4-b5a4-47fd-850a-23c004d701ad.jpeg?alt=media&token=9d33bd58-83c4-494f-9b83-9ba0225f9b1e",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Formulario PWP",
+   "ghl_id": "jOeHe0GtxySw9L0Fr0hw",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "https://forms.gle/P4A4XuqFM3caRigq5",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-067.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fd0f534a3-f708-419d-b8c4-00a7064382eb.jpeg?alt=media&token=cc7ed4e3-4461-4e67-aa38-28e34950eade",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Gerente, Habilitador o Limitador",
+   "ghl_id": "ct6SlirC6jJouguOvbhM",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*El gerente de ventas, ¿Habilitador o limitación del potencial de su equipo de ventas?*\n\nMicro gestión, replicación y desarrollo son el dolor de cabeza de muchos líderes de ventas dentro de las organizaciones.\n\n*¿Nos dejas ayudarte en esta tarea?*\n\n1️⃣ Si\n2️⃣ No",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-047.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F77a89a6e-7d50-4825-9779-c37f5fa1806f.png?alt=media&token=18b8dde6-3402-4e29-a3d2-1202a5870dcc",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Importancia del formulario",
+   "ghl_id": "nieZC4tPvnojkazmjYyE",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Te platico, la razón por la que este formulario es importante, es porque *no hacemos cotizaciones genéricas*, sino que ofrecemos soluciones personalizadas para cada situación a partir de la información que les solicitamos 🙂 🙏🏼",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Importe de pago automático - WhatsApp",
+   "ghl_id": "gb45OgMqoikyQWanOWqz",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{receiverFirstName}}\n\nEl monto de la suscripción correspondiente a la factura {{invoiceName}} ha sido actualizado a un pago de {{totalAmount}}\n\nSaludos,\n{{senderFullName}}\n{{subAccountName}}",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Información de pago Automático - WhatsApp",
+   "ghl_id": "BE6OAKSLltEuMdwaDiP4",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{receiverFirstName}}\n\nEl pago de suscripción por {{totalAmount}} correspondiente a la factura  {{invoiceName}} vence el {{dueDate}} y se procesará a través de la tarjeta {{cardName}} terminada en {{cardLast4}}\n\nSaludos,\n{{senderFullName}}\n{{subAccountName}}",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Insistir formulario",
+   "ghl_id": "EOIcankaeq3eNtKdggkm",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "{{contact.first_name}}, es un gusto saludarte nuevamente.\n\nPara nosotros es muy importante conocer más acerca de tus necesidades específicas a través del formulario que te compartí,\n\n¿Aún deseas continuar la conversación sobre como *Duplicar tus ventas en 3 meses o menos*? 📈",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Lugar de capacitación",
+   "ghl_id": "GuIJ0hnnU0paAmF4nX6k",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Todas las capacitaciones de ventas que damos, las hacemos en las instalaciones de nuestros clientes. Nuestro curso de ventas único en su tipo está pensado para llevarse a cabo de esta manera.",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Mensaje proyecto activado",
+   "ghl_id": "M37TRJJCTf0w9AyMnH67",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Te compartimos el estatus y las fechas del proyecto:\n\nPara asegurar la mejor calidad en nuestros entregables, trabajamos con un proceso estructurado que contempla 45 días hábiles como tiempo estándar de desarrollo.\n\nTomando como referencia la primera fecha de pago: {{fecha primer pago}}, el calendario queda así:\n\nRevisión preliminar: {{fecha}}\n\nFecha de lanzamiento: {{fecha}}\n\nDurante el desarrollo estaremos en contacto contigo para solicitar información adicional si es necesaria y para coordinar la revisión preliminar.\n\nSeguimos avanzando y en comunicación constante.\nQuedamos atentos.",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-026.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F2692e753-c19f-45a1-a7ad-731c94350414.png?alt=media&token=1b97a8dd-0440-46a1-b2d4-e1cead1ebc6b",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Métodos de pago",
+   "ghl_id": "Cqs1n8kZLFsr4DsaLYxE",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Te compartimos nuestros métodos de pago disponibles ✅\n\n1. Transferencia SPEI 🏦\n- Banco: Scotiabank\n- Nombre: MANUEL ALEJANDRO MORENO BARRERA\n- CLABE: 044790256003235484\n- Cuenta: 25600323548\n\n2. Pago con TDC o TDD https://buy.stripe.com/5kA2am14JcR0dFe7ss 💳\n\n¿Me compartirías tu Constancia de situación fiscal para la emitir la factura correspondiente?",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Onboarding PVP - lavendi.mx",
+   "ghl_id": "w23IdspeCZLAQKAvShJ7",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "*¡Te damos la bienvenida a lavendi.mx!*\n\nEn este documento tienes toda la *información y pasos a seguir* para iniciar con tu proyecto:\n\nhttps://docs.google.com/document/d/12HfJMfD91CxWpK9IiV37EAgbnTdplLelvS2UMS7nDm8/edit?usp=sharing\n\nDéjanos saber cualquier duda o comentario y, nuevamente ¡Bienvenid@!\n\nEl equipo de lavendi.mx,",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-016.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F1439b88a-de00-4dd3-bb86-870844a7a8ad.png?alt=media&token=9c7fc411-f4ee-496c-bf7d-7d979232107b",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Onboarding PWP - lavendi.mx",
+   "ghl_id": "r5Q1uNjWkgJzODfrg9Dg",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "*¡Te damos la bienvenida a lavendi.mx!*\n\nEn este documento tienes toda la *información y pasos a seguir* para iniciar con tu proyecto web: https://docs.google.com/document/d/1hMbKbaRiMKw3uKP9i0QaICdW0XyDSGeOBAYDeJrMBvY/edit?usp=sharing\n\nDéjanos saber cualquier duda o comentario y, nuevamente ¡Bienvenid@!\n\nEl equipo de lavendi.mx,",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-016.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F196cf34f-1977-4c1f-82dc-5d9115a5f6b2.png?alt=media&token=b60e9c19-8098-40e8-b3f1-dd71bd2dedd8",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Onboarding SGPT - lavendi.mx",
+   "ghl_id": "BtyvFGiJdpU7POTicp3s",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "*¡Te damos la bienvenida a lavendi.mx!*\n\nEn este documento tienes toda la *información y pasos a seguir* para iniciar con tu proyecto:\n\nhttps://docs.google.com/document/d/1sxpMh_hgKGmXfy9tiki8mYdX9icsgOB5dLd9hlP6FR8/edit?usp=sharing\n\nDéjanos saber cualquier duda o comentario y, nuevamente ¡Bienvenid@!\n\nEl equipo de lavendi.mx,",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-016.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F10ad933e-668a-498b-8019-62ce14179173.png?alt=media&token=6d5eb3fe-ea4d-4b50-9ef3-6d73ed40f71f",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Orden de compra enviada",
+   "ghl_id": "FMo0jTyBUg4ccYIAioog",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}} 🙂\n\nEspero que estés bien. Te escribo ya que recientemente hemos finalizado una fase de tu proyecto y derivado de esto, tenemos un saldo pendiente relacionado.\n\nTe he compartido en un email la factura correspondiente, *¿La recibiste correctamente?*",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Orden de compra Notificación Whatsapp",
+   "ghl_id": "PJKnkBmnuC2eHaKqYH8B",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}},\n\nlavendimx te ha enviado la orden de compra {{ invoice.number }} por {{ invoice.total_amount }} que vence el {{ invoice.due_date }} . Link a factura: {{ invoice.url }}\n\n¿Hay alguna información más que necesites o que pueda proporcionarte por ahora?",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pago de la factura efetuado correctamente",
+   "ghl_id": "QN1A6s3ZAkUXfOqXbSZO",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}} 🙂,\n\nHemos recibido tu pago correctamente por un total de {{invoice.amount_paid}}, quedando un saldo pendiente de {{invoice.balance_due}} ✅\n\nMuchas gracias por la confianza en llevar a cabo tu proyecto con nosotros .",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pago de la orden de compra No. {{ invoice.id }} confirmado",
+   "ghl_id": "1rTrjKhVpmILhtqTeUTw",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Confirmamos la recepción de tu pago. Agradecemos tu confianza y preferencia 🙂 \n\nEn menos de 24 hrs. hábiles estaremos en contacto contigo para los pasos a seguir ✅\n\nEl equipo de {{location.name}},",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pago recibido (SPEI)",
+   "ghl_id": "jWvYOLTRjUths93cpffP",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Muchas gracias por confiar en nosotros para llevar a cabo tu proyecto. 🙂\n\nEn las próximas 24 horas hábiles🕚 nos pondremos en contacto contigo para indicarte los siguientes pasos a seguir.✨\n\n¿Hay algo más en lo que pueda apoyarte por ahora?",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pago recibido correctamente",
+   "ghl_id": "mdTBFFe3V0nuQ44kPjCu",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hemos recibido tu pago correctamente 🙂, muchas gracias por la confianza en llevar a cabo tu proyecto con nosotros 🙏🏼",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pasos a seguir - PVP",
+   "ghl_id": "FbTYCppTreklQlTgfM73",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "Gracias por confiar en nosotros. Te comparto los pasos a seguir:\n\n*1. Programar la entrevista a profundidad* para conocer su modelo de negocio a detalle (Si ya lo has hecho, no es necesario hacerlo de nuevo) ✅: https://api.sofia.lavendi.mx/widget/bookings/lavendimx/clientes \n\n*2. Formalizar nuestro acuerdo* con el 50% de anticipo. 🤝 Datos bancarios:\nBanco: Scotiabank\nNombre: MANUEL ALEJANDRO MORENO BARRERA\nCLABE: 044790256003235484\nCuenta: 25600323548\n\n3. ¿Nos compartes tu *Constancia de Situación Fiscal* para la elaboración de tu factura?\n\n¿Qué te parece? *¿Hay alguna otra información adicional que necesites de nuestra parte?*",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Planes de pago SofÍA GPT",
+   "ghl_id": "bWmQCRAjUFGSy9DJP7yw",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "💡 Conoce nuestros planes de CRM + Agente IA\n\nTenemos opciones flexibles que se adaptan al tamaño y necesidades de tu equipo.      \n⚙️https://lavendi.mx/sofiagpt",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-057.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fadfe0c29-82f3-4688-be79-322ed85d3a38.jpeg?alt=media&token=d38ae4fc-37c5-46fd-a796-0e1946abd468",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Precierre",
+   "ghl_id": "wxwjMgF212PuRTwFAQZM",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¿Hay alguna información más que necesites o que pueda proporcionarte por ahora?",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pregunta",
+   "ghl_id": "4w32zsJmI5El1iBngsGJ",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Bien, te platico, para comprender mejor qué necesitas y enviarte una cotización específica, hemos preparado un formulario que puedes contestar desde tu móvil u ordenador en menos de 3 minutos.\n\n¿Me ayudas a contestarlo? 🙂",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Presente",
+   "ghl_id": "WxdkGppMgTkDdrG6lT4G",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "{{contact.name}}: Hola {{contact.first_name}}, paso por aquí rápidamente sólo para comentarte que, estamos en el proceso del desarrollo de tu proyecto conforme al tiempo de entrega 🗓️\n\nEn próximos días estaremos en contacto contigo para la revisión preliminar y tu retroalimentación. ¡Que sigas teniendo un gran día! 🙂",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Producto (PVP 2.1)",
+   "ghl_id": "OdfBoPip8jAcetWB2W9y",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "lavendimx presenta el curso:\n *Habilidades avanzadas de ventas*\nhttps://youtu.be/RSjtrZyyWwc",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-041.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F651a971c-2f33-423b-a10a-bbbfdd2de1bb.png?alt=media&token=96b99da4-fbbe-47bb-91d1-3b6b0abc6c6e",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Producto (PVP)",
+   "ghl_id": "nMHev3sptVENpI6RbnFd",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "Producto de interés: *Curso Taller de Ventas Premium*📊\nhttps://lavendi.mx/proceso-de-ventas/",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-029.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F34222093-1ee5-446d-8e79-bc1580017634.jpeg?alt=media&token=be63d631-6a26-47ab-a227-d92c0935fb15",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Producto - Sistema de ventas por internet",
+   "ghl_id": "etjsHafSGgWBWdKMBDoN",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Producto de interés: *Sistema de ventas por internet* 🛒\n  🌐 https://lavendi.mx/",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-023.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F18fc89d1-60d5-4984-8269-330ca5ca5b44.png?alt=media&token=28895dfa-fcaf-43fe-b68e-3138d32f1016",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Producto - SofÍA GPT",
+   "ghl_id": "ZjnIDzBK371Ufko0dV3x",
+   "canal": "WhatsApp",
+   "categoria": "SGPT",
+   "texto": "https://lavendi.mx/sofiagpt 🧠",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-043.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F6ecc90ad-d26d-4f61-ab82-30adef422fa5.png?alt=media&token=0de5beac-e449-4254-a899-9b39ddfbdd25",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "producto Google ads / EGT",
+   "ghl_id": "Xc8W7J3u9jA5GoOlgfql",
+   "canal": "WhatsApp",
+   "categoria": "EGT",
+   "texto": "Google Ads 📈\nhttps://lavendi.mx/google-ads-2",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-017.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F10fe26e5-a1f3-48bf-ae19-1bb117be5f09.png?alt=media&token=8845514b-bf12-42c8-934b-9ae9445041a4",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Producto PWP",
+   "ghl_id": "pYeNfbGKy6Alezj0BZ0q",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "*Página Web Premium*\nhttps://lavendi.mx/transformaciondigital-2",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-070.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fdd847c90-5534-4ac6-adb9-0d43286d63a2.jpg?alt=media&token=bef2a620-c984-47a8-83ef-bbacf588f44b",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "prueba1",
+   "ghl_id": "TXjVwnUzJp0HvRgdqHzN",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Esto es un mensaje de prueba",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Reagendar",
+   "ghl_id": "dH9lyHsygUTx8OqMww7j",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¡Hola! {{contact.first_name}}, sabemos que los imprevistos pueden ocurrir. ¿Qué te parece si reagendamos nuestra videollamada? 🙂 \n\n*¿Cuándo podrías nuevamente?* 🗓️",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Recordatorio de cobranza",
+   "ghl_id": "OuX258SCm10iSFdAgZYi",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}} 🙂,\n\nHemos finalizado una fase de tu proyecto, derivado de esto, tenemos un saldo pendiente relacionado.\n\nFactura pendiente: {{ invoice.url }}\n\nSi ya realizaste tu pago, por favor haz caso omiso de este mensaje, *muchas gracias por la confianza para llevar a cabo tu proyecto con nosotros* 🙏🏼",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-076.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Feb856dc8-ce83-43fa-8dbb-d36b30a4c513.jpeg?alt=media&token=c5729ded-4779-45e3-b759-6699be7eb64e",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Renovación Anual de Hostinger",
+   "ghl_id": "Pw8he16CI1qbORtXoIOo",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola [Nombre] 🙂\n\nHa llegado el momento de la *renovación de tu servicio de Hosting* que tienes con nosotros, esta renovación cubre el periodo Enero - Diciembre 2026 según el último pago de renovación de hosting que hiciste con nosotros. \n\nTe compartimos nuestros métodos de pago y evitar cualquier interrupción en el funcionamiento de la página web. ✅\n\nTransferencia SPEI 🏦\nBanco: Scotiabank\nNombre: MANUEL ALEJANDRO MORENO BARRERA\nCLABE: 044790256003235484\nCuenta: 25600323548\n*Importe: $1,250.00 MXN*\n\nEn cuanto realices tu pago agradeceré nos compartas el comprobante. Si tienes cualquier duda o pregunta, estamos a tus órdenes. Mil gracias ✅",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Renovación de dominio",
+   "ghl_id": "m5e4DzPirInX662HEYK9",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}}\n\n*- Tu dominio está por vencer.* En caso de no realizar el pago, el sitio web no será visible.\n\n- Adjunto linea de captura para renovación anual.\n\n- Beneficiario: Hostinger\n\n*Es importante recordar que toda página web implica 2 costos anuales: Dominio y hosting.*\n\nCualquier duda o comentario estamos atentos. Que sigas teniendo un gran día.",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Reseñas -",
+   "ghl_id": "jo0uyreeb4sGGWn16Sb7",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Gracias por confiar en nosotros 😁 ¿Podrías dejarnos una breve reseña sobre tu experiencia? Tu opinión es muy importante✨\n\n👉 Haz clic aquí para dejar tu opinión: https://g.page/r/CXk2jNry-osiEB0/review",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Retomar",
+   "ghl_id": "CDVUnQgFpuKrmsqrEPal",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}}, *¿Te gustaría retomar la conversación sobre tu proyecto con nosotros?* 📈 💻\n\n1️⃣ Sí.\n2️⃣ No.\n\nMuchas gracias de ante mano por tu respuesta🙏",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Saludo con firma",
+   "ghl_id": "YSu6M7dtCQfZoyGqYapg",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}} , te saluda {{user.first_name}} por aquí 🙂 ¿Cómo te encuentras el día de hoy?",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Saludo inicial",
+   "ghl_id": "d0RLUxmEYGGRhXV5yR5u",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}}, 👋🏼\n \nMi nombre es Sofía, parte del equipo de lavendi.mx - Desarrolladores de modelos de negocio en línea y ventas.\n\nEstoy respondiendo a tu solicitud de contacto a través de nuestra página web, ¿Es correcto? 🙂\n\nProducto de interés:\n{{contact.cual_es_el_principal_producto_que_te_interesa_selecciona_los_que_te_interesan}}",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Seguimiento de voz",
+   "ghl_id": "TDpqGm39B0SVLxSFUax1",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Hola {{contact.first_name}} ¿Cómo estas? 🙂",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-066.wav",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fcd21f609-d44d-49e2-afd3-2077e5f7e475.wav?alt=media&token=540a7e84-9174-435f-9a3a-c45d474ed876",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Seguimiento pago inicial",
+   "ghl_id": "EZL8DLOEtM9Ow8eeFWIH",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*Nuestros tiempos de entrega reflejan la calidad de lo que hacemos.*\n\nMuchas gracias por tu confianza. Para asegurar tu lugar en nuestro calendario de producción necesitamos confirmar tu pago. *Nuestro tiempo de entrega se cuenta a partir de la fecha de pago incial.* 🗓️\n\n¿Hay alguna información adicional que necesites de nuestra parte? ✅",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-060.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fb2165229-63bf-4147-8048-38c8e8ddcace.jpeg?alt=media&token=9332e738-2e73-4807-8c97-7fabb62a1521",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "test1",
+   "ghl_id": "ezP07I9pYUydrdOLN41F",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "prueba",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Ubicación de lavendimx",
+   "ghl_id": "qkWRZq08dlVCPFKqS0fH",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Te platico, nuestra base de operaciones está en Villahermosa, México. Desde aquí prestamos nuestros servicios a clientes que como tú se acercan a nosotros desde diferentes lugares de México, EUA y Europa 🌎\n\nPor la naturaleza de nuestro trabajo, las limitaciones geográficas no son un obstáculo para desempeñar lo que mejor hacemos 👨‍💻\n\nSi quieres saber más acerca de nuestra ubicación, puedes consultar el siguiente enlace 📍\n\nhttps://g.page/lavendimx?share",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Ultimatum PVP",
+   "ghl_id": "U899Isyu4VdWaI84KtkW",
+   "canal": "WhatsApp",
+   "categoria": "PVP",
+   "texto": "¡Hola {{contact.first_name}}! ¿Deseas seguir siendo contactado por lavendi.mx para conversar acerca de cómo *lograr un equipo de ventas profesional y de primera clase?* 🙂\n\n1️⃣ Si\n2️⃣ No\n\nAgradecemos mucho tu respuesta 🙏🏼",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-025.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F2298ca76-7f8c-423a-bf68-ba6f6e953c7a.png?alt=media&token=52f19a65-bc11-472c-9011-b995602d7eb8",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Ultimatum PWP",
+   "ghl_id": "9RM9XN5TU0cCQPXa5o1d",
+   "canal": "WhatsApp",
+   "categoria": "PWP",
+   "texto": "¡Hola {{contact.first_name}}! ¿Deseas seguir siendo contactado por lavendi.mx para conversar acerca de tu *Página web o tienda en línea premium con la capacidad de persuadir, cautivar y convertir?* 🙂\n\n1️⃣ Si\n2️⃣ No\n\nAgradecemos mucho tu respuesta 🙏🏼",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-058.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Faf888c16-037b-4051-b195-10d1e3977386.jpeg?alt=media&token=824ec6be-e13b-4267-9e0a-ac6984dfbd65",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "valente",
+   "ghl_id": "9iiX8PL34HQXfiwikjuo",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "*Valente Flores:*",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Videollamada",
+   "ghl_id": "vRpd1r5HuLDIjlLuFusU",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¿Qué te parece si *programamos una videollamada* para conversar de manera detallada sobre la cotización que te enviamos? 💻 ✅",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Videollamada Leads",
+   "ghl_id": "WxKJffg904SlXtfxBrBu",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "Programa tu videollamada con nosotros en el horario de tu preferencia:\n👉https://api.sofia.lavendi.mx/widget/bookings/lavendimx/clientes",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-062.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fb901b70a-fdde-4884-9168-3d27bb4fea5a.jpeg?alt=media&token=5c28d1e2-9e03-4e35-a146-b81ab3c2c3da",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Videollamada Prospectos",
+   "ghl_id": "gfaJSQHAbjtDzIFtPCgQ",
+   "canal": "WhatsApp",
+   "categoria": "General",
+   "texto": "¿Cuándo podrías para la videollamada? Si me das un par de opciones, podemos enviarte la invitación.\n\nSi prefieres, puedes programar directamente la videollamada con nosotros aquí:\n👉 https://api.sofia.lavendi.mx/widget/bookings/lavendimx",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-062.jpg",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fd157438a-3b2f-4947-a20a-1fcc2f8d1636.jpeg?alt=media&token=5fd4c646-4841-4afd-892b-7c03e044b9fb",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er Seguimiento Google Ads / EGT",
+   "ghl_id": "VIbXHoX3RdBENOElE4Jn",
+   "canal": "Email",
+   "categoria": "EGT",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-018.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F12bd5332-d26a-42af-a0ad-802e0546531c.png?alt=media&token=39d47663-ed25-4699-a787-82c4aa6e0934",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er. Seg SofÍA GPT",
+   "ghl_id": "wzX86eHE6VarAa2PXoJh",
+   "canal": "Email",
+   "categoria": "SGPT",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-038.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F57e67f27-fc57-488c-bf23-235b2d9cbe44.png?alt=media&token=e3570f8e-1262-485e-bd4b-f9763fc94703",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er. Seg. PVP (Videollamada)",
+   "ghl_id": "BC6eO3F86zTEoPX1uxec",
+   "canal": "Email",
+   "categoria": "PVP",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-040.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F7400b6ac-1316-48fb-b5fc-6e6229dd3377.png?alt=media&token=9d4b810e-b8f7-4c95-896f-1003598cc36f",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "1er. Seg. PWP",
+   "ghl_id": "VFN9DMEMTpIzAgsghnLo",
+   "canal": "Email",
+   "categoria": "PWP",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-042.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F69e5da53-c765-49ca-ac03-7131fd6602c5.png?alt=media&token=cda62580-d8bb-4471-a5d1-6efef07c8e44",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "2do. Seg. PVP",
+   "ghl_id": "A3xO6xdfXaSrKGawbLFC",
+   "canal": "Email",
+   "categoria": "PVP",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-015.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fa7d2f00d-ada4-4664-99c6-179cfd62b3ee.png?alt=media&token=1f04534b-9e35-4dfc-a8dc-853837fcb02e",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "3r.Seg PVP (reseñas)",
+   "ghl_id": "CDhqskmz9UPuYNTF6h59",
+   "canal": "Email",
+   "categoria": "PVP",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-033.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F40676ada-2f13-417d-bad1-370b21b4fc62.png?alt=media&token=6543cbd4-00b8-4bac-9c70-a9faff0ca082",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "4to. Seg. PVP - spotify",
+   "ghl_id": "0NS55tGmUI8QSqP6qLX1",
+   "canal": "Email",
+   "categoria": "PVP",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-053.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fa0fbc5ab-90ac-4848-9404-b5b20a8c03a1.png?alt=media&token=36b5ecfb-c458-4350-9ba2-59171901e206",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "5to Seg Todos los productos Descuento especial.",
+   "ghl_id": "y1hSsX9tP7EhCaQp90nO",
+   "canal": "Email",
+   "categoria": "General",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-049.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2F8272a7ac-e55b-4c9d-a114-ebcb6671d7ed.png?alt=media&token=c8396140-d481-4f77-b093-63deeb915694",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Pago de la orden de compra No. {{ invoice.id }}, confirmado",
+   "ghl_id": "CDqIn5IYxZjTcVY18Yxt",
+   "canal": "Email",
+   "categoria": "General",
+   "texto": "",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Producto - PVP",
+   "ghl_id": "v0dALJQSysYL0QXkdaAX",
+   "canal": "Email",
+   "categoria": "PVP",
+   "texto": "",
+   "adjunto": "https://sofiav2.lavendi.mx/files/secuencia-4-seg-025.png",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fe57459a5-f7f1-47f2-b0a6-25f3d6ad47ed.png?alt=media&token=82eae826-1083-40aa-8391-ec25b3ce91d2",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Recordatorio de cobranza.",
+   "ghl_id": "QFpchGA3QepkUYwKsaZF",
+   "canal": "Email",
+   "categoria": "General",
+   "texto": "",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Retomar",
+   "ghl_id": "fBRAa24olT2SA21autPm",
+   "canal": "Email",
+   "categoria": "General",
+   "texto": "",
+   "adjunto": "",
+   "adjunto_ghl": "",
+   "adjunto_sin_rehospedar": false
+  },
+  {
+   "titulo": "Saludo inicial - PWP",
+   "ghl_id": "FOIQbTBQYp9WOsejiUJ6",
+   "canal": "Email",
+   "categoria": "PWP",
+   "texto": "",
+   "adjunto": "",
+   "adjunto_ghl": "https://firebasestorage.googleapis.com/v0/b/highlevel-backend.appspot.com/o/location%2FFG3KBslyUoNf3Ar9YVHJ%2Ftemplates%2Fdd847c90-5534-4ac6-adb9-0d43286d63a2.jpg?alt=media&amp;token=bef2a620-c984-47a8-83ef-bbacf588f44b\"",
+   "adjunto_sin_rehospedar": true
+  }
+ ]
+}

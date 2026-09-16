@@ -1,0 +1,543 @@
+{#
+  Renderizador propio de Web Form — el módulo de formularios del nuevo Sofía.
+  Contexto y motivos en `api/formularios.py`.
+
+  Página standalone (no extiende `templates/web.html`) por la misma razón que
+  `agenda_cita.html`: aquí no hay navbar, footer ni breadcrumbs que ocultar
+  después con `!important`. Lo que no se pinta no hay que taparlo.
+
+  Sin gtag dentro del iframe A PROPÓSITO. La conversión la dispara la página
+  anfitriona al recibir el `postMessage` de envío: el tag de Ads vive en
+  lavendi.mx con su propio consentimiento y su propio linker, y cargarlo aquí
+  abriría una segunda sesión de analítica en otro origen que contaría el mismo
+  visitante dos veces.
+#}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ titulo or "Formulario" }} · lavendi.mx</title>
+<link rel="icon" href="https://lavendi.mx/wp-content/uploads/2020/08/logo-lavendi.mx_-e1596934014832.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?{{ tema.fuentes }}&display=swap" rel="stylesheet">
+<style>
+  :root {
+    {%- for k, v in tema.vars.items() %}
+    --{{ k }}: {{ v }};
+    {%- endfor %}
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    /* Transparente cuando va embebido: el fondo lo pone la tarjeta de la
+       landing, y así el formulario no dibuja un rectángulo sobre ella. */
+    background: {% if embebido %}transparent{% else %}var(--fondo-pagina){% endif %};
+    min-height: {% if embebido %}0{% else %}100%{% endif %};
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .envoltura {
+    max-width: 620px;
+    margin: 0 auto;
+    padding: {% if embebido %}10px 2px 10px{% else %}40px 20px 56px{% endif %};
+  }
+
+  /* --- encabezado --- */
+  .cabecera { margin-bottom: 22px; }
+  .cabecera h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(1.35rem, 3.4vw, 1.75rem);
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    margin: 0 0 8px;
+    color: var(--ink);
+  }
+  .cabecera p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.95rem;
+  }
+
+  /* --- campos --- */
+  .fila {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .campo { display: flex; flex-direction: column; min-width: 0; }
+
+  .campo label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .campo label .req { color: var(--acento); margin-left: 2px; }
+
+  .campo input,
+  .campo textarea,
+  .campo select {
+    font-family: inherit;
+    font-size: 1rem;
+    color: var(--ink);
+    background: var(--superficie);
+    border: 1px solid var(--linea);
+    border-radius: var(--radio);
+    /* 48 px de alto real: por debajo de 44 el dedo falla, y el 60% del
+       tráfico de estas landings entra por móvil. */
+    padding: 13px 14px;
+    width: 100%;
+    transition: border-color .15s, background .15s, box-shadow .15s;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .campo textarea { min-height: 96px; resize: vertical; }
+  .campo input::placeholder, .campo textarea::placeholder {
+    color: var(--ink-soft); opacity: .65;
+  }
+  .campo input:hover, .campo textarea:hover { border-color: var(--linea-fuerte); }
+  .campo input:focus, .campo textarea:focus, .campo select:focus {
+    outline: none;
+    border-color: var(--acento);
+    background: var(--superficie-alta);
+    box-shadow: 0 0 0 3px var(--acento-tenue);
+  }
+  .campo .ayuda {
+    font-size: 0.78rem; color: var(--ink-soft); margin-top: 5px; opacity: .85;
+  }
+  .campo .yerro {
+    font-size: 0.78rem; color: var(--error); margin-top: 5px; display: none;
+  }
+  .campo.malo input, .campo.malo textarea, .campo.malo select { border-color: var(--error); }
+  .campo.malo .yerro { display: block; }
+
+  /* --- sección de opciones como tarjetas ---
+     Es la diferencia visible con la plantilla genérica de Frappe: una fila de
+     casillas se lee como un trámite; una rejilla de tarjetas se lee como una
+     elección, y es lo que hace que la gente marque algo en vez de saltárselo. */
+  .seccion { margin: 24px 0 18px; }
+  .seccion > .titulo {
+    font-family: var(--display);
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 12px;
+    line-height: 1.35;
+  }
+  .tarjetas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 460px) { .tarjetas { grid-template-columns: 1fr; } }
+
+  .tarjeta {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 14px 14px 13px;
+    min-height: 56px;
+    border: 1px solid var(--linea);
+    border-radius: var(--radio);
+    background: var(--superficie);
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .08s;
+    user-select: none;
+  }
+  .tarjeta:hover { border-color: var(--linea-fuerte); background: var(--superficie-alta); }
+  .tarjeta:active { transform: scale(.99); }
+  .tarjeta input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .tarjeta .marca {
+    flex: 0 0 20px; width: 20px; height: 20px;
+    border: 1.5px solid var(--linea-fuerte);
+    /* Fijo, no derivado de --radio: con el radio de los temas redondeados la
+       casilla de 20 px se veía circular, y un círculo dice "elige una" cuando
+       aquí se puede marcar más de un producto. */
+    border-radius: 5px;
+    display: grid; place-items: center;
+    transition: border-color .15s, background .15s;
+  }
+  .tarjeta .marca svg { width: 12px; height: 12px; opacity: 0; transition: opacity .12s; }
+  .tarjeta .texto { font-size: 0.92rem; font-weight: 500; color: var(--ink); line-height: 1.3; }
+  .tarjeta input:checked ~ .marca { background: var(--acento); border-color: var(--acento); }
+  .tarjeta input:checked ~ .marca svg { opacity: 1; }
+  .tarjeta:has(input:checked) { border-color: var(--acento); background: var(--acento-tenue); }
+  .tarjeta input:focus-visible ~ .marca { box-shadow: 0 0 0 3px var(--acento-tenue); }
+
+  /* --- trampa para bots: fuera de vista, pero no `hidden` --- */
+  .trampa {
+    position: absolute !important; left: -9999px !important;
+    width: 1px; height: 1px; overflow: hidden;
+  }
+
+  /* --- CTA --- */
+  .pie { margin-top: 22px; }
+  .cta {
+    width: 100%;
+    font-family: var(--body);
+    font-size: 1rem;
+    font-weight: var(--peso-cta);
+    letter-spacing: var(--caja-cta);
+    text-transform: var(--mayus-cta);
+    color: var(--acento-ink);
+    background: var(--acento);
+    border: none;
+    border-radius: var(--radio);
+    padding: 16px 20px;
+    min-height: 52px;
+    cursor: pointer;
+    transition: background .15s, opacity .15s, transform .08s;
+  }
+  .cta:hover:not(:disabled) { background: var(--acento-alto); }
+  .cta:active:not(:disabled) { transform: scale(.995); }
+  .cta:disabled { opacity: .6; cursor: not-allowed; }
+  .cta:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acento-tenue); }
+
+  .nota-pie {
+    margin: 12px 0 0; text-align: center;
+    font-size: 0.76rem; color: var(--ink-soft); opacity: .8;
+  }
+
+  .aviso {
+    margin-top: 14px; padding: 12px 14px;
+    border: 1px solid var(--error); border-radius: var(--radio);
+    color: var(--error); font-size: 0.88rem;
+  }
+
+  /* --- acuse --- */
+  .exito { text-align: center; padding: 32px 8px 28px; }
+  .exito .icono {
+    width: 62px; height: 62px; margin: 0 auto 18px;
+    border-radius: 50%; display: grid; place-items: center;
+    background: var(--acento-tenue); border: 1.5px solid var(--acento);
+    animation: brota .38s cubic-bezier(.2,.9,.3,1.3);
+  }
+  .exito .icono svg { width: 28px; height: 28px; }
+  .exito h2 {
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(1.3rem, 3.2vw, 1.6rem);
+    margin: 0 0 8px; color: var(--ink);
+  }
+  .exito p { margin: 0; color: var(--ink-soft); font-size: 0.96rem; }
+  @keyframes brota { from { transform: scale(.4); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+
+  .oculto { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="envoltura" id="raiz">
+
+{% if error %}
+  <div class="aviso" style="margin-top:0">{{ error }}</div>
+{% else %}
+
+  <form id="formulario" novalidate autocomplete="on">
+
+    {% if mostrar_titulo or intro %}
+    <div class="cabecera" id="cabecera">
+      {% if mostrar_titulo %}<h1>{{ titulo }}</h1>{% endif %}
+      {% if intro %}<p>{{ intro }}</p>{% endif %}
+    </div>
+    {% endif %}
+
+    {% for bloque in bloques %}
+      {% if bloque.solo_checks %}
+        <div class="seccion">
+          {% if bloque.titulo %}<p class="titulo">{{ bloque.titulo }}</p>{% endif %}
+          <div class="tarjetas">
+            {% for c in bloque.campos %}
+              <label class="tarjeta">
+                <input type="checkbox" name="{{ c.fieldname }}" value="1">
+                <span class="marca" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none">
+                    <path d="M3 8.5l3.2 3.2L13 5" stroke="{{ tema.vars['acento-ink'] }}"
+                          stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="texto">{{ c.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </div>
+      {% else %}
+        {% if bloque.titulo %}
+          <div class="seccion"><p class="titulo">{{ bloque.titulo }}</p></div>
+        {% endif %}
+        {% for fila in bloque.pares %}
+          <div class="fila" style="--cols:{{ fila|length }}">
+            {% for c in fila %}
+              <div class="campo" data-campo="{{ c.fieldname }}"
+                   data-reqd="{{ c.reqd }}" data-tipo="{{ c.options or c.fieldtype }}">
+                <label for="f-{{ c.fieldname }}">
+                  {{ c.label }}{% if c.reqd %}<span class="req">*</span>{% endif %}
+                </label>
+                {% if c.fieldtype in ("Small Text", "Text", "Text Editor", "Long Text") %}
+                  <textarea id="f-{{ c.fieldname }}" name="{{ c.fieldname }}"
+                            {% if c.reqd %}aria-required="true"{% endif %}></textarea>
+                {% elif c.fieldtype == "Select" %}
+                  <select id="f-{{ c.fieldname }}" name="{{ c.fieldname }}"
+                          {% if c.reqd %}aria-required="true"{% endif %}>
+                    <option value="">—</option>
+                    {% for op in c.options.split("\n") %}
+                      {% if op.strip() %}<option value="{{ op.strip() }}">{{ op.strip() }}</option>{% endif %}
+                    {% endfor %}
+                  </select>
+                {% else %}
+                  <input id="f-{{ c.fieldname }}" name="{{ c.fieldname }}"
+                         type="{% if c.options == 'Email' %}email{% elif c.options == 'Phone' %}tel{% else %}text{% endif %}"
+                         {% if c.options == 'Email' %}autocomplete="email" inputmode="email"
+                         {% elif c.options == 'Phone' %}autocomplete="tel" inputmode="tel"
+                         {% elif c.fieldname in ('nombre', 'name') %}autocomplete="name"{% endif %}
+                         {% if c.reqd %}aria-required="true"{% endif %}>
+                {% endif %}
+                {% if c.description %}<span class="ayuda">{{ c.description }}</span>{% endif %}
+                <span class="yerro" id="e-{{ c.fieldname }}" role="alert"></span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endfor %}
+
+    {# Trampa: etiquetada como un campo real y sacada de vista por CSS. Un bot
+       que rellena todo lo que encuentra la llena; una persona no la ve.
+       ⚠ Sin tokens que disparen el autofill (nada de "empresa"/"company") y con
+       los opt-outs de los gestores de contraseñas: el 15-sep el autofill llenó
+       este campo en un lead real y se perdió. Ver `formularios.py`. #}
+    <div class="trampa" aria-hidden="true">
+      <label for="f-{{ campo_trampa }}">Referencia</label>
+      <input id="f-{{ campo_trampa }}" name="{{ campo_trampa }}" type="text"
+             tabindex="-1" autocomplete="off" data-lpignore="true"
+             data-1p-ignore data-bwignore data-form-type="other">
+    </div>
+
+    {# Atribución: la rellena el JS desde el query string de ESTA URL, que es
+       donde `attr-iframe.js` de lavendi.mx deja los parámetros de la página
+       anfitriona. Ninguna automatización posterior interviene. #}
+    {% for campo in campos_atribucion %}
+      <input type="hidden" name="{{ campo }}" id="f-{{ campo }}">
+    {% endfor %}
+
+    <div class="pie">
+      <button type="submit" class="cta" id="enviar">{{ boton }}</button>
+      <p class="nota-pie" id="nota">Respondemos en menos de 24 horas hábiles.</p>
+      <div class="aviso oculto" id="aviso-general" role="alert"></div>
+    </div>
+  </form>
+
+  <div class="exito oculto" id="exito">
+    <div class="icono">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M4 12.5l5 5L20 6.5" stroke="{{ tema.vars['acento'] }}"
+              stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2>{{ exito_titulo }}</h2>
+    <p>{{ exito_mensaje }}</p>
+  </div>
+
+{% endif %}
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var CSRF = {{ csrf_token | tojson }};
+  var WEB_FORM = {{ (web_form_name or "") | tojson }};
+  var RUTA = {{ (ruta or "") | tojson }};
+  var ATRIBUCION = {{ (campos_atribucion or []) | tojson }};
+
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $('formulario');
+
+  // ---------------------------------------------------------------------
+  // Altura: el padre no puede medir el contenido de un iframe de otro origen,
+  // así que se la mandamos. Sin esto habría que fijar una altura a ojo — que
+  // es exactamente lo que hacía el embed anterior (780 px fijos), dejando un
+  // hueco muerto en escritorio y recortando el botón en móvil.
+  // ---------------------------------------------------------------------
+  var ultimoAlto = 0;
+  function avisarAlto() {
+    var raiz = $('raiz');
+    if (!raiz) return;
+    var alto = Math.ceil(raiz.getBoundingClientRect().height) + 8;
+    if (Math.abs(alto - ultimoAlto) < 2) return;
+    ultimoAlto = alto;
+    try {
+      parent.postMessage({ source: 'sofia-form', tipo: 'alto', alto: alto, ruta: RUTA }, '*');
+    } catch (e) { /* sin padre: link directo */ }
+  }
+  if (window.ResizeObserver) {
+    new ResizeObserver(avisarAlto).observe($('raiz'));
+  }
+  window.addEventListener('load', avisarAlto);
+  setTimeout(avisarAlto, 400);
+  setTimeout(avisarAlto, 1500);   // tras cargar las tipografías
+
+  if (!form) return;
+
+  // ---------------------------------------------------------------------
+  // Atribución desde el query string de esta URL.
+  // ---------------------------------------------------------------------
+  (function () {
+    var p = new URLSearchParams(window.location.search);
+    ATRIBUCION.forEach(function (campo) {
+      var v = p.get(campo);
+      if (v) { var el = $('f-' + campo); if (el) el.value = v.slice(0, 140); }
+    });
+    // `pagina_origen` cae al referrer sólo si no vino explícito: dentro de un
+    // iframe el referrer ES la página anfitriona, así que sirve de red aunque
+    // quien pegue el embed olvide pasar el dato.
+    var po = $('f-pagina_origen');
+    if (po && !po.value && document.referrer) po.value = document.referrer.slice(0, 140);
+  })();
+
+  // ---------------------------------------------------------------------
+  // Validación
+  // ---------------------------------------------------------------------
+  var RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+  function campoDe(nombre) { return form.querySelector('[data-campo="' + nombre + '"]'); }
+
+  function marcar(caja, mensaje) {
+    if (!caja) return;
+    caja.classList.toggle('malo', !!mensaje);
+    var e = caja.querySelector('.yerro');
+    if (e) e.textContent = mensaje || '';
+  }
+
+  function validarCampo(caja) {
+    var input = caja.querySelector('input, textarea, select');
+    if (!input) return true;
+    var v = (input.value || '').trim();
+    var reqd = caja.getAttribute('data-reqd') === '1';
+    var tipo = caja.getAttribute('data-tipo') || '';
+
+    if (reqd && !v) { marcar(caja, 'Este dato es obligatorio.'); return false; }
+    if (v && tipo === 'Email' && !RE_EMAIL.test(v)) {
+      marcar(caja, 'Revisa el correo, parece incompleto.'); return false;
+    }
+    if (v && tipo === 'Phone') {
+      var digitos = v.replace(/\D/g, '');
+      if (digitos.length < 10) {
+        marcar(caja, 'El teléfono necesita al menos 10 dígitos.'); return false;
+      }
+    }
+    marcar(caja, '');
+    return true;
+  }
+
+  // Validar al salir del campo, no al teclear: corregir a alguien mientras
+  // escribe su correo marca en rojo cada letra hasta la arroba.
+  Array.prototype.forEach.call(form.querySelectorAll('[data-campo]'), function (caja) {
+    var input = caja.querySelector('input, textarea, select');
+    if (!input) return;
+    input.addEventListener('blur', function () { validarCampo(caja); });
+    input.addEventListener('input', function () {
+      if (caja.classList.contains('malo')) validarCampo(caja);
+    });
+  });
+
+  function avisoGeneral(msg) {
+    var caja = $('aviso-general');
+    if (!msg) { caja.classList.add('oculto'); caja.textContent = ''; return; }
+    caja.textContent = msg;
+    caja.classList.remove('oculto');
+    avisarAlto();
+  }
+
+  // ---------------------------------------------------------------------
+  // Envío — vía `accept()` de Frappe, no escritura directa del doctype.
+  // ---------------------------------------------------------------------
+  var enviando = false;
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (enviando) return;
+
+    var cajas = Array.prototype.slice.call(form.querySelectorAll('[data-campo]'));
+    var ok = true;
+    var primeraMala = null;
+    cajas.forEach(function (caja) {
+      if (!validarCampo(caja)) { ok = false; if (!primeraMala) primeraMala = caja; }
+    });
+    if (!ok) {
+      avisoGeneral('');
+      if (primeraMala) {
+        var i = primeraMala.querySelector('input, textarea, select');
+        if (i) i.focus();
+      }
+      avisarAlto();
+      return;
+    }
+
+    var datos = {};
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name) return;
+      if (el.type === 'checkbox') datos[el.name] = el.checked ? 1 : 0;
+      else datos[el.name] = (el.value || '').trim();
+    });
+
+    enviando = true;
+    var btn = $('enviar');
+    var etiqueta = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    avisoGeneral('');
+
+    fetch('/api/method/frappe.website.doctype.web_form.web_form.accept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': CSRF },
+      body: JSON.stringify({ web_form: WEB_FORM, data: JSON.stringify(datos) })
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, status: r.status, cuerpo: j }; });
+    }).then(function (res) {
+      if (!res.ok) throw res;
+      exito();
+    }).catch(function (res) {
+      enviando = false;
+      btn.disabled = false;
+      btn.textContent = etiqueta;
+      // 429 es el rate limit de Frappe (10/min por IP). Da un mensaje distinto
+      // porque el visitante no hizo nada mal y reintentar de inmediato falla.
+      var status = (res && res.status) || 0;
+      if (status === 429) {
+        avisoGeneral('Recibimos varios envíos desde tu conexión. Espera un minuto e inténtalo otra vez.');
+      } else {
+        avisoGeneral('No pudimos enviar tu solicitud. Revisa tu conexión e inténtalo de nuevo, o escríbenos por WhatsApp al 55 5966 8622.');
+      }
+    });
+  });
+
+  function exito() {
+    form.classList.add('oculto');
+    $('exito').classList.remove('oculto');
+    avisarAlto();
+    // El padre dispara la conversión. Se manda DESPUÉS de que el servidor
+    // confirmó la escritura, nunca al hacer clic: contar un clic como lead
+    // infla la señal con la que Ads decide dónde gastar.
+    try {
+      parent.postMessage({ source: 'sofia-form', tipo: 'enviado', ruta: RUTA }, '*');
+    } catch (e) { /* link directo */ }
+    try {
+      $('exito').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>

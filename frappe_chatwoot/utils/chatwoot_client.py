@@ -49,7 +49,10 @@ source of every shape/quirk referenced below):
 """
 
 import json
+import mimetypes
+import os
 import time
+from urllib.parse import unquote, urlparse
 
 import frappe
 import requests
@@ -294,6 +297,40 @@ def _post(path: str, payload: dict):
     return resp.json()
 
 
+def _put(path: str, payload: dict):
+    """PUT against the Chatwoot account API. Nunca cachea (mutación).
+
+    Mismo contrato que `_post`; se separó solo por el verbo. Chatwoot usa PUT
+    (no PATCH) para actualizar un contacto — verificado en vivo 2026-09-15."""
+    settings = _settings()
+    token = _api_token(settings)
+    url = f"{settings.base_url}/api/v1/accounts/{settings.account_id}{path}"
+    try:
+        resp = requests.put(
+            url,
+            headers={"api_access_token": token},
+            json=payload,
+            timeout=HTTP_TIMEOUT,
+        )
+    except requests.RequestException as e:
+        frappe.log_error(title="frappe_chatwoot: upstream request failed", message=str(e))
+        raise ChatwootAPIError(f"Could not reach Chatwoot: {e}")
+
+    if resp.status_code >= 400:
+        detail = _extract_error_detail(resp)
+        frappe.log_error(
+            title="frappe_chatwoot: Chatwoot API error",
+            message=f"PUT {url} -> {resp.status_code}\n{resp.text[:2000]}",
+        )
+        raise ChatwootAPIError(
+            f"Chatwoot: {detail}" if detail
+            else f"Chatwoot API returned {resp.status_code} for {path}"
+        )
+
+    clear_cache()
+    return resp.json()
+
+
 # ---------------------------------------------------------------------------
 # Public accessors — one function per Chatwoot endpoint shape we consume.
 # ---------------------------------------------------------------------------
@@ -328,6 +365,68 @@ def get_conversations_for_contact(contact_id: int) -> list[dict]:
 def search_contacts(query: str) -> list[dict]:
     data = _get("/contacts/search", {"q": query})
     return data.get("payload") or []
+
+
+def get_contact(contact_id: int) -> dict:
+    """Ficha completa del contacto, incluido `contact_inboxes`.
+
+    `search_contacts` NO devuelve `contact_inboxes`, y el `source_id` de ese
+    arreglo es lo único con lo que se puede abrir una conversación en un inbox
+    de tipo API. Por eso la ficha se relee aunque la búsqueda ya haya devuelto
+    el contacto."""
+    data = _get(f"/contacts/{contact_id}")
+    return data.get("payload") or data
+
+
+def update_contact(contact_id: int, **fields) -> dict:
+    """Actualiza un contacto de Chatwoot (PUT). Hoy solo se usa para el nombre
+    (`utils/chatwoot_contactos`), pero acepta cualquier campo de la API."""
+    data = _put(f"/contacts/{contact_id}", fields)
+    return data.get("payload") or data
+
+
+def list_contacts(page: int = 1) -> dict:
+    """Página de contactos de Chatwoot. Forma: `{"meta": {"count": N}, "payload": [...]}`.
+
+    A diferencia de `/contacts/search`, esta sí pagina por offset — la usa el
+    backfill de nombres para recorrer los ~60 contactos existentes."""
+    return _get("/contacts", {"page": page})
+
+
+def create_contact(*, inbox_id: int, name: str, phone_number: str,
+                   identifier: str | None = None) -> dict:
+    """Alta de contacto. Devuelve el contacto plano (con `contact_inboxes`).
+
+    Chatwoot envuelve esto dos veces: {"payload": {"contact": {...}}}. Se
+    desenvuelve aquí para que quien llama trabaje siempre con la misma forma
+    que `get_contact`."""
+    payload = {"inbox_id": inbox_id, "name": name, "phone_number": phone_number}
+    if identifier:
+        payload["identifier"] = identifier
+    data = _post("/contacts", payload)
+    cuerpo = data.get("payload") or data
+    return cuerpo.get("contact") or cuerpo
+
+
+def create_contact_inbox(*, contact_id: int, inbox_id: int,
+                         source_id: str | None = None) -> dict:
+    """Da de alta al contacto en un inbox donde todavía no existe.
+
+    Pasa cuando el contacto se creó en otro inbox (por ejemplo el del sitio
+    web) y ahora hay que escribirle por WhatsApp: sin este registro no hay
+    `source_id` y la conversación no se puede abrir."""
+    payload = {"inbox_id": inbox_id}
+    if source_id:
+        payload["source_id"] = source_id
+    return _post(f"/contacts/{contact_id}/contact_inboxes", payload)
+
+
+def create_conversation(*, source_id: str, inbox_id: int,
+                        contact_id: int | None = None) -> dict:
+    payload = {"source_id": source_id, "inbox_id": inbox_id}
+    if contact_id:
+        payload["contact_id"] = contact_id
+    return _post("/conversations", payload)
 
 
 def list_canned_responses() -> list[dict]:
@@ -558,12 +657,199 @@ def _flag_send_status(created: dict) -> dict:
     return created
 
 
-def create_message(conversation_id: int, content: str, private: bool = False) -> dict:
-    created = _post(
-        f"/conversations/{conversation_id}/messages",
-        {"content": content, "message_type": "outgoing", "private": private},
-    )
+def create_message(conversation_id: int, content: str, private: bool = False,
+                   content_attributes: dict | None = None) -> dict:
+    payload = {"content": content, "message_type": "outgoing", "private": private}
+    if content_attributes:
+        # Marca del mensaje. El proceso `agente-ia` lee `content_attributes` para
+        # distinguir sus propios envíos (`sofia_bot`) de los de un humano
+        # (`humano`) — ver `esDeHumanoDelEquipo` en server.js. Un envío del CRM
+        # no trae `source_id: WAID:` ni la firma `**Nombre:**` del bridge, que
+        # son las otras dos señales, así que sin esta marca el agente lo leería
+        # como propio.
+        payload["content_attributes"] = content_attributes
+    created = _post(f"/conversations/{conversation_id}/messages", payload)
     return _flag_send_status(created)
+
+
+def leer_adjunto(url: str):
+    """(nombre, bytes, mime) de un adjunto subido al sitio, o None si no se pudo leer.
+
+    Primero del disco del sitio (`public/files/`, que es donde `upload_file` deja lo
+    que sube el CRM); si no está ahí, por HTTPS. Compartido por el envío inmediato
+    (`api/chatwoot.send_message`) y los programados (`utils/programados`): los dos
+    necesitan el binario para mandarlo como media nativa — con la URL pegada al
+    `content` el cliente ve un enlace, no la imagen.
+    """
+    if not url:
+        return None
+    try:
+        ruta = unquote(urlparse(url).path or "")
+    except ValueError:
+        return None
+    nombre = os.path.basename(ruta) or "adjunto"
+    mime = mimetypes.guess_type(nombre)[0] or "application/octet-stream"
+
+    datos = None
+    if ruta.startswith("/files/"):
+        local = frappe.get_site_path("public", "files", unquote(ruta[len("/files/"):]))
+        try:
+            with open(local, "rb") as f:
+                datos = f.read()
+        except OSError:
+            datos = None
+
+    if datos is None:
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 200:
+                datos = resp.content
+                mime = resp.headers.get("Content-Type") or mime
+        except Exception:
+            datos = None
+
+    if not datos:
+        return None
+    return nombre, datos, mime
+
+
+def create_message_with_attachment(conversation_id: int, content: str, *, filename: str,
+                                   data: bytes, content_type: str | None = None,
+                                   private: bool = False) -> dict:
+    """POST .../messages como **multipart**, con el archivo como adjunto real.
+
+    POR QUÉ multipart y no una URL dentro del `content`: con la URL en el texto
+    el cliente ve un enlace, no la imagen. Verificado en producción el
+    14-sep-2026 — el mensaje de prueba de la secuencia PVP llegó con
+    `https://sofiav2.lavendi.mx/files/secuencia-4-seg-059.png` como texto y
+    **0 filas en `attachments`**. Chatwoot sube el binario a Active Storage y
+    lo entrega por el canal como media nativa. El costo es subir el binario en
+    cada envío; con el volumen de una secuencia (27 deals, un puñado de pasos
+    con media) es irrelevante frente a la diferencia de lo que ve el cliente.
+
+    `attachments[]` es el nombre que espera el strong-params de Chatwoot
+    (`message_params` permite `attachments: []`); el valor va como archivo del
+    multipart, no como campo de texto.
+    """
+    settings = _settings()
+    token = _api_token(settings)
+    url = (f"{settings.base_url}/api/v1/accounts/{settings.account_id}"
+           f"/conversations/{conversation_id}/messages")
+    files = {
+        "attachments[]": (
+            filename,
+            data,
+            content_type or "application/octet-stream",
+        ),
+    }
+    form = {
+        "content": content or "",
+        "message_type": "outgoing",
+        "private": "true" if private else "false",
+    }
+    try:
+        resp = requests.post(
+            url,
+            headers={"api_access_token": token},
+            data=form,
+            files=files,
+            timeout=HTTP_TIMEOUT * 3,  # subir media pesa más que un JSON
+        )
+    except requests.RequestException as e:
+        frappe.log_error(title="frappe_chatwoot: upstream request failed", message=str(e))
+        _write_log(
+            request_type="Send Message", endpoint="/messages (multipart)",
+            payload={"conversation_id": conversation_id, "filename": filename},
+            error=str(e)[:2000],
+        )
+        raise ChatwootAPIError(f"Could not reach Chatwoot: {e}")
+
+    if resp.status_code >= 400:
+        detail = _extract_error_detail(resp)
+        frappe.log_error(
+            title="frappe_chatwoot: Chatwoot API error",
+            message=f"POST {url} -> {resp.status_code}\n{resp.text[:2000]}",
+        )
+        _write_log(
+            request_type="Send Message", endpoint="/messages (multipart)",
+            status_code=resp.status_code,
+            payload={"conversation_id": conversation_id, "filename": filename},
+            error=detail,
+        )
+        raise ChatwootAPIError(
+            f"Chatwoot: {detail}" if detail
+            else f"Chatwoot API returned {resp.status_code} for /messages"
+        )
+
+    clear_cache()
+    return _flag_send_status(resp.json())
+
+
+def create_message_with_attachments(conversation_id: int, content: str, *, archivos,
+                                    private: bool = False,
+                                    content_attributes: dict | None = None) -> dict:
+    """Como `create_message_with_attachment` pero con varios adjuntos en un solo
+    mensaje (Chatwoot acepta N `attachments[]` por mensaje).
+
+    `archivos` = lista de `(filename, data, content_type)`. Mismo criterio de
+    multipart que la versión de uno solo (ver su docstring): con la URL en el
+    texto el cliente ve un enlace, no la imagen.
+
+    `content_attributes` va como string JSON porque el cuerpo es multipart y
+    Rails no parsea un hash anidado desde form-data — con `create_message`
+    (JSON) sí viaja como objeto.
+    """
+    settings = _settings()
+    token = _api_token(settings)
+    url = (f"{settings.base_url}/api/v1/accounts/{settings.account_id}"
+           f"/conversations/{conversation_id}/messages")
+    files = [
+        ("attachments[]", (fn, data, ct or "application/octet-stream"))
+        for fn, data, ct in archivos
+    ]
+    form = {
+        "content": content or "",
+        "message_type": "outgoing",
+        "private": "true" if private else "false",
+    }
+    if content_attributes:
+        form["content_attributes"] = json.dumps(content_attributes)
+    try:
+        resp = requests.post(
+            url,
+            headers={"api_access_token": token},
+            data=form,
+            files=files,
+            timeout=HTTP_TIMEOUT * 3,  # subir media pesa más que un JSON
+        )
+    except requests.RequestException as e:
+        frappe.log_error(title="frappe_chatwoot: upstream request failed", message=str(e))
+        _write_log(
+            request_type="Send Message", endpoint="/messages (multipart)",
+            payload={"conversation_id": conversation_id, "n_archivos": len(archivos)},
+            error=str(e)[:2000],
+        )
+        raise ChatwootAPIError(f"Could not reach Chatwoot: {e}")
+
+    if resp.status_code >= 400:
+        detail = _extract_error_detail(resp)
+        frappe.log_error(
+            title="frappe_chatwoot: Chatwoot API error",
+            message=f"POST {url} -> {resp.status_code}\n{resp.text[:2000]}",
+        )
+        _write_log(
+            request_type="Send Message", endpoint="/messages (multipart)",
+            status_code=resp.status_code,
+            payload={"conversation_id": conversation_id, "n_archivos": len(archivos)},
+            error=detail,
+        )
+        raise ChatwootAPIError(
+            f"Chatwoot: {detail}" if detail
+            else f"Chatwoot API returned {resp.status_code} for /messages"
+        )
+
+    clear_cache()
+    return _flag_send_status(resp.json())
 
 
 def toggle_conversation_status(conversation_id: int, status: str) -> dict:
@@ -706,3 +992,42 @@ def get_profile() -> dict:
 def list_inboxes() -> list[dict]:
     data = _get("/inboxes")
     return data.get("payload") or []
+
+
+# Prefijo de Active Storage (el almacén de archivos de Rails, sobre el que corre
+# Chatwoot). Es el único path que el proxy de adjuntos acepta.
+ACTIVE_STORAGE_PREFIX = "/rails/active_storage/"
+
+
+def fetch_attachment(path: str) -> tuple[bytes, str]:
+    """Descarga un adjunto de Chatwoot y devuelve (contenido, content_type).
+
+    POR QUÉ HACE FALTA UN PROXY, en vez de que el navegador lo pida directo:
+    los `data_url` que devuelve Chatwoot apuntan a su host interno de Coolify
+    por **http**. El CRM se sirve por https, así que el navegador bloquearía la
+    imagen por contenido mixto — y ese host además no está publicado. El archivo
+    tiene que pasar por el servidor.
+
+    Solo se recibe el **path**, nunca una URL completa: el host lo pone el
+    servidor desde `Chatwoot Settings`. Así este endpoint no puede convertirse en
+    un SSRF con el que pedirle al servidor que traiga cualquier dirección.
+    """
+    if not path or not path.startswith(ACTIVE_STORAGE_PREFIX):
+        raise ChatwootAPIError("Ruta de adjunto no permitida")
+    if ".." in path:
+        raise ChatwootAPIError("Ruta de adjunto no permitida")
+
+    settings = _settings()
+    token = _api_token(settings)
+    url = f"{settings.base_url.rstrip('/')}{path}"
+    try:
+        resp = requests.get(
+            url, headers={"api_access_token": token},
+            timeout=HTTP_TIMEOUT * 3,  # una foto de obra pesa bastante más que un JSON
+            allow_redirects=True,
+        )
+    except requests.RequestException as e:
+        raise ChatwootAPIError(f"No se pudo descargar el adjunto: {e}")
+    if resp.status_code != 200:
+        raise ChatwootAPIError(f"Chatwoot devolvió {resp.status_code} al pedir el adjunto")
+    return resp.content, resp.headers.get("Content-Type") or "application/octet-stream"

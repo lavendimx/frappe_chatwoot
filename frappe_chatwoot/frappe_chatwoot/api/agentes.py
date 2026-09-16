@@ -14,7 +14,7 @@
 
 import frappe
 
-from frappe_chatwoot.frappe_chatwoot.api.chatwoot import validate_role
+from frappe_chatwoot.frappe_chatwoot.api.chatwoot import _pause_conversation, validate_role
 
 
 @frappe.whitelist()
@@ -60,3 +60,12 @@ def resume_conversation(conversation_id: int) -> None:
     name = frappe.db.exists("Chatwoot Pausa", {"conversation_id": frappe.utils.cint(conversation_id)})
     if name:
         frappe.delete_doc("Chatwoot Pausa", name, ignore_permissions=True)
+
+
+@frappe.whitelist()
+def pause_conversation(conversation_id: int, inbox_id: int = None) -> None:
+    """Pausa el agente en esta conversación a mano, sin esperar a que un humano
+    responda primero (ver send_message._pause_conversation, mismo mecanismo).
+    Espejo de resume_conversation — botón 'Pausar agente' en la UI."""
+    validate_role()
+    _pause_conversation(frappe.utils.cint(conversation_id), inbox_id)

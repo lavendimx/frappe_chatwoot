@@ -1,0 +1,390 @@
+{#
+  Agenda pública — reemplazo de los widgets `widget/bookings/...` de GoHighLevel.
+
+  Página standalone a propósito: NO extiende el layout del portal de Frappe. El visitante
+  viene del sitio de la agencia y no debe aterrizar en una pantalla con la navegación del
+  CRM, el "Login" arriba a la derecha ni la marca de Frappe — eso es justo lo que se está
+  dejando atrás con GHL.
+
+  El `perfil` y la disponibilidad ya vienen resueltos del servidor (`agenda_publica.py`).
+  El navegador nunca decide qué horas existen: solo pinta lo que recibió y lo revalida el
+  servidor al reservar.
+#}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ titulo_pagina }} · lavendi.mx</title>
+<link rel="icon" href="https://lavendi.mx/wp-content/uploads/2020/08/logo-lavendi.mx_-e1596934014832.png">
+
+{#
+  Medición. Esta página vivía SIN un solo tag: el `dataLayer.push` de más abajo se escribía
+  en un arreglo que nadie leía. Lo único que medía una reserva era el rebote a
+  `lavendi.mx/gracias`, donde GTM sí corre y dispara la conversión de Ads por regla de URL
+  exacta. Al quitar ese rebote (para que el cliente vea su cita y su liga de Meet) las
+  reservas se habrían quedado sin medir por completo.
+
+  Se carga gtag directo y NO el contenedor GTM, a propósito: aquí solo hacen falta dos
+  cosas — el Conversion Linker de Ads (que gtag trae de fábrica y escribe la cookie `_gcl`
+  en el dominio raíz, así que el gclid del clic en lavendi.mx sigue vivo en este
+  subdominio) y el pageview de GA4. Montar el contenedor completo traería además los
+  listeners de clic y los tags del sitio, que aquí no aplican.
+
+  DEUDA CONOCIDA: la conversión se dispara desde este archivo y no desde GTM-M5WZ568, que
+  es donde el equipo la va a buscar. Es un puente para no perder conteo mientras se crea el
+  trigger propio en GTM; ver la tarea de Notion del 2026-09-13.
+#}
+<script async src="https://www.googletagmanager.com/gtag/js?id=AW-905296272"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'AW-905296272');
+  gtag('config', 'G-KG30MD87BD');
+</script>
+<style>
+  :root {
+    --morado: #8446e3;
+    --morado-oscuro: #6b33c4;
+    --tinta: #1b1b25;
+    --tenue: #6b6b7b;
+    --linea: #e4e4ec;
+    --fondo: #f7f6fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--fondo);
+    color: var(--tinta);
+    line-height: 1.5;
+  }
+  .marco { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+  .logo { height: 34px; margin-bottom: 28px; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--tenue); margin: 0 0 8px; font-size: 15px; }
+  .duracion {
+    display: inline-block; font-size: 13px; font-weight: 600; color: var(--morado);
+    background: #f0e9fd; border-radius: 999px; padding: 3px 12px; margin-bottom: 24px;
+  }
+  .tarjeta {
+    background: #fff; border: 1px solid var(--linea); border-radius: 14px;
+    padding: 22px; margin-bottom: 18px;
+  }
+  .paso { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+          color: var(--tenue); margin: 0 0 14px; }
+
+  /* Días: tira horizontal deslizable. En móvil un <select> obligaría a dos toques para ver
+     qué día tiene huecos; así se ve de un vistazo. */
+  .dias { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+  .dia {
+    flex: 0 0 auto; min-width: 74px; min-height: 68px; border: 1px solid var(--linea);
+    background: #fff; border-radius: 10px; cursor: pointer; text-align: center;
+    padding: 8px 6px; font: inherit; color: inherit; transition: .12s;
+  }
+  .dia:hover { border-color: var(--morado); }
+  .dia[aria-pressed="true"] { background: var(--morado); border-color: var(--morado); color: #fff; }
+  .dia .dow { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .75; }
+  .dia .num { display: block; font-size: 21px; font-weight: 700; line-height: 1.2; }
+  .dia .mes { display: block; font-size: 11px; opacity: .75; }
+
+  .horas { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 16px; }
+  .hora {
+    min-height: 44px; border: 1px solid var(--linea); background: #fff; border-radius: 9px;
+    cursor: pointer; font: inherit; font-weight: 600; color: var(--tinta); transition: .12s;
+  }
+  .hora:hover { border-color: var(--morado); color: var(--morado); }
+  .hora[aria-pressed="true"] { background: var(--morado); border-color: var(--morado); color: #fff; }
+
+  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 5px; }
+  input, textarea {
+    width: 100%; min-height: 44px; padding: 10px 12px; font: inherit;
+    border: 1px solid var(--linea); border-radius: 9px; background: #fff; color: var(--tinta);
+  }
+  textarea { min-height: 84px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--morado); outline-offset: 1px; border-color: transparent; }
+  .opcional { font-weight: 400; color: var(--tenue); }
+
+  .cta {
+    width: 100%; min-height: 50px; margin-top: 22px; border: 0; border-radius: 10px;
+    background: var(--morado); color: #fff; font: inherit; font-size: 16px; font-weight: 700;
+    cursor: pointer;
+  }
+  .cta:hover { background: var(--morado-oscuro); }
+  .cta:disabled { opacity: .55; cursor: not-allowed; }
+
+  .aviso { margin-top: 14px; padding: 12px 14px; border-radius: 9px; font-size: 14px; }
+  .aviso.error { background: #fdecec; color: #a0242a; }
+  .aviso.info { background: #eef1fd; color: #2f3f8f; }
+  .resumen { font-size: 14px; color: var(--tenue); margin-top: 4px; }
+  .resumen b { color: var(--tinta); }
+
+  .exito { text-align: center; padding: 8px 0 4px; }
+  .exito .tache { font-size: 42px; line-height: 1; }
+  .exito h2 { font-size: 21px; margin: 12px 0 6px; }
+  .exito a.meet {
+    display: inline-block; margin-top: 16px; padding: 12px 20px; min-height: 44px;
+    background: var(--morado); color: #fff; border-radius: 10px; font-weight: 700; text-decoration: none;
+  }
+  .pie { text-align: center; font-size: 13px; color: var(--tenue); margin-top: 26px; }
+  .pie a { color: var(--morado); }
+  .oculto { display: none !important; }
+
+  @media (max-width: 520px) {
+    .marco { padding: 22px 14px 48px; }
+    h1 { font-size: 22px; }
+    .horas { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<div class="marco">
+  <img class="logo" src="https://lavendi.mx/wp-content/uploads/2020/08/logo-lavendi.mx_-e1596934014832.png" alt="lavendi.mx">
+
+  <div id="reserva">
+    <h1>{{ titulo_pagina }}</h1>
+    <p class="sub" id="descripcion"></p>
+    <span class="duracion" id="duracion"></span>
+
+    <div class="tarjeta" id="tarjeta-fecha">
+      <p class="paso">1 · Elige día y hora</p>
+      <div class="dias" id="dias"></div>
+      <div class="horas" id="horas"></div>
+      <div class="aviso info oculto" id="sin-huecos">
+        No hay horarios disponibles en las próximas semanas.
+        Escríbenos por <a href="https://wa.me/525559668622">WhatsApp</a> y lo resolvemos.
+      </div>
+    </div>
+
+    <form class="tarjeta oculto" id="tarjeta-datos" autocomplete="on" novalidate>
+      <p class="paso">2 · Tus datos</p>
+      <p class="resumen" id="resumen"></p>
+
+      <label for="nombre">Nombre completo</label>
+      <input id="nombre" name="name" autocomplete="name" required>
+
+      <label for="email">Correo</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
+
+      <div id="campo-telefono">
+        <label for="telefono">Teléfono (WhatsApp)</label>
+        <input id="telefono" name="tel" type="tel" autocomplete="tel" inputmode="tel">
+      </div>
+
+      <div id="campo-empresa">
+        <label for="empresa">Empresa <span class="opcional">(opcional)</span></label>
+        <input id="empresa" name="organization" autocomplete="organization">
+      </div>
+
+      <label for="mensaje">¿De qué quieres que hablemos? <span class="opcional">(opcional)</span></label>
+      <textarea id="mensaje"></textarea>
+
+      <button class="cta" type="submit" id="enviar">Confirmar videollamada</button>
+      <div class="aviso error oculto" id="error"></div>
+    </form>
+  </div>
+
+  <div class="tarjeta exito oculto" id="confirmacion">
+    <div class="tache">✓</div>
+    <h2>Tu videollamada quedó agendada</h2>
+    <p class="sub" id="confirmacion-detalle"></p>
+    <p class="sub">Te llegó la invitación por correo con la liga de Google Meet.</p>
+    <a class="meet oculto" id="meet" target="_blank" rel="noopener">Abrir Google Meet</a>
+  </div>
+
+  <p class="pie">
+    ¿Necesitas algo más pronto? Escríbenos por
+    <a href="https://wa.me/525559668622">WhatsApp</a>.
+  </p>
+</div>
+
+<script>
+(function () {
+  var PERFIL = {{ perfil | tojson }};
+  // Frappe rechaza con 400 cualquier POST de navegador sin este token, incluso en un
+  // endpoint `allow_guest`. La primera prueba E2E falló exactamente por aquí: por curl
+  // pasaba y desde el formulario no.
+  var CSRF = {{ csrf_token | tojson }};
+  var DATOS = {{ disponibilidad | safe }};
+
+  var $ = function (id) { return document.getElementById(id); };
+  var MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  var DOW = ['dom','lun','mar','mié','jue','vie','sáb'];
+
+  var elegido = { fecha: null, hora: null };
+
+  // Se construye la fecha a mediodía UTC para que el día pintado sea el mismo que mandó el
+  // servidor: con medianoche, el offset del navegador puede correrlo al día anterior.
+  function comoFecha(iso) { return new Date(iso + 'T12:00:00Z'); }
+
+  function textoDia(iso) {
+    var d = comoFecha(iso);
+    return DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' de ' + MESES[d.getUTCMonth()];
+  }
+
+  if (!DATOS || !DATOS.ok) {
+    $('tarjeta-fecha').innerHTML =
+      '<div class="aviso error">No pudimos cargar los horarios en este momento. ' +
+      'Escríbenos por <a href="https://wa.me/525559668622">WhatsApp</a> y te agendamos.</div>';
+    return;
+  }
+
+  var perfil = DATOS.perfil || {};
+  $('descripcion').textContent = perfil.descripcion || '';
+  $('duracion').textContent = (perfil.duracion_minutos || 30) + ' minutos · videollamada';
+  if (!perfil.pedir_telefono) $('campo-telefono').classList.add('oculto');
+  if (!perfil.pedir_empresa) $('campo-empresa').classList.add('oculto');
+
+  var dias = DATOS.dias || [];
+  if (!dias.length) {
+    $('sin-huecos').classList.remove('oculto');
+    return;
+  }
+
+  function pintarDias() {
+    var cont = $('dias');
+    cont.innerHTML = '';
+    dias.forEach(function (d, i) {
+      var f = comoFecha(d.fecha);
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dia';
+      b.setAttribute('aria-pressed', String(i === 0));
+      b.innerHTML = '<span class="dow">' + DOW[f.getUTCDay()] + '</span>' +
+                    '<span class="num">' + f.getUTCDate() + '</span>' +
+                    '<span class="mes">' + MESES[f.getUTCMonth()] + '</span>';
+      b.onclick = function () {
+        elegido = { fecha: d.fecha, hora: null };
+        Array.prototype.forEach.call(cont.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+        b.setAttribute('aria-pressed', 'true');
+        pintarHoras(d);
+        $('tarjeta-datos').classList.add('oculto');
+      };
+      cont.appendChild(b);
+    });
+    elegido.fecha = dias[0].fecha;
+    pintarHoras(dias[0]);
+  }
+
+  function pintarHoras(dia) {
+    var cont = $('horas');
+    cont.innerHTML = '';
+    dia.slots.forEach(function (s) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'hora';
+      b.textContent = s.hora;
+      b.setAttribute('aria-pressed', 'false');
+      b.onclick = function () {
+        elegido.hora = s.hora;
+        Array.prototype.forEach.call(cont.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+        b.setAttribute('aria-pressed', 'true');
+        $('resumen').innerHTML = '<b>' + textoDia(dia.fecha) + '</b> a las <b>' + s.hora + '</b> (hora del centro de México)';
+        $('tarjeta-datos').classList.remove('oculto');
+        $('tarjeta-datos').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+      cont.appendChild(b);
+    });
+  }
+
+  pintarDias();
+
+  // Atribución: se arrastra la query string de la página que trajo al visitante, igual que
+  // hacía el formulario de GHL. Si no viene, el lead entra sin UTM — no se inventa.
+  function param(nombre) {
+    return new URLSearchParams(window.location.search).get(nombre) || '';
+  }
+
+  $('tarjeta-datos').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var err = $('error');
+    err.classList.add('oculto');
+
+    if (!elegido.fecha || !elegido.hora) {
+      err.textContent = 'Elige un día y una hora.';
+      err.classList.remove('oculto');
+      return;
+    }
+
+    var boton = $('enviar');
+    boton.disabled = true;
+    boton.textContent = 'Agendando…';
+
+    var cuerpo = {
+      perfil: PERFIL,
+      nombre: $('nombre').value.trim(),
+      email: $('email').value.trim(),
+      telefono: $('telefono').value.trim(),
+      empresa: $('empresa').value.trim(),
+      mensaje: $('mensaje').value.trim(),
+      fecha: elegido.fecha,
+      hora: elegido.hora,
+      pagina_origen: document.referrer || '',
+      utm_source: param('utm_source'),
+      utm_medium: param('utm_medium'),
+      utm_campaign: param('utm_campaign'),
+      utm_term: param('utm_term'),
+      gclid: param('gclid')
+    };
+
+    fetch('/api/method/frappe_chatwoot.frappe_chatwoot.api.agenda_publica.reservar', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-Frappe-CSRF-Token': CSRF
+      },
+      body: JSON.stringify(cuerpo)
+    }).then(function (r) { return r.json(); }).then(function (json) {
+      var res = json.message || {};
+      if (!res.ok) {
+        err.textContent = res.mensaje || 'No pudimos agendar. Intenta con otro horario.';
+        err.classList.remove('oculto');
+        boton.disabled = false;
+        boton.textContent = 'Confirmar videollamada';
+        return;
+      }
+
+      // Evento de conversión: el formulario de GHL vivía en un iframe de otro dominio y GA4
+      // nunca pudo ver un envío. Ahora sí.
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({ event: 'generate_lead', form_name: 'agenda-' + PERFIL });
+
+      // Las dos señales que antes dependían del rebote a /gracias. El `send_to` es el mismo
+      // par id/label que dispara GTM allá (AW-905296272 / sq_kCJeZq-UYEJDz1q8D), así que el
+      // conteo en Ads queda idéntico a como estaba — ni se pierde ni se duplica, porque ya
+      // no hay rebote. Cuando exista la conversión propia de "videollamada agendada", este
+      // label se cambia por el nuevo y deja de mezclarse con el del formulario.
+      if (typeof gtag === 'function') {
+        gtag('event', 'conversion', { send_to: 'AW-905296272/sq_kCJeZq-UYEJDz1q8D' });
+        gtag('event', 'generate_lead', { form_name: 'agenda-' + PERFIL });
+      }
+
+      if (perfil.redirect_ok) {
+        window.location.href = perfil.redirect_ok;
+        return;
+      }
+
+      $('reserva').classList.add('oculto');
+      $('confirmacion-detalle').innerHTML =
+        '<b>' + textoDia(elegido.fecha) + '</b> a las <b>' + elegido.hora + '</b> · ' +
+        (res.duracion_minutos || '') + ' minutos';
+      if (res.meetLink) {
+        $('meet').href = res.meetLink;
+        $('meet').classList.remove('oculto');
+      }
+      $('confirmacion').classList.remove('oculto');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }).catch(function () {
+      err.textContent = 'No pudimos conectar. Revisa tu conexión e intenta de nuevo.';
+      err.classList.remove('oculto');
+      boton.disabled = false;
+      boton.textContent = 'Confirmar videollamada';
+    });
+  });
+})();
+</script>
+</body>
+</html>

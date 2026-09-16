@@ -1,0 +1,265 @@
+{#
+  Gestión de una cita ya reservada — cancelar o cambiar la hora.
+
+  Lo que GHL sí dejaba hacer y la primera versión de esta agenda no: hasta hoy cada cambio
+  de cita entraba por WhatsApp y lo movía una persona a mano en Google Calendar.
+
+  Página standalone, igual que `agenda_publica.html`: el visitante viene de su invitación de
+  Google, no del CRM. Sin gtag a propósito — aquí no hay conversión que medir, y cargar el
+  tag de Ads en una página de cancelación contaría clics que no son de compra.
+
+  El token viaja en `?t=...` y NO se pinta en ningún enlace hacia fuera: quien lo tenga
+  manda sobre esa cita.
+#}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>{{ titulo_pagina }} · lavendi.mx</title>
+<link rel="icon" href="https://lavendi.mx/wp-content/uploads/2020/08/logo-lavendi.mx_-e1596934014832.png">
+<style>
+  :root {
+    --morado: #8446e3;
+    --morado-oscuro: #6b33c4;
+    --tinta: #1b1b25;
+    --tenue: #6b6b7b;
+    --linea: #e4e4ec;
+    --fondo: #f7f6fb;
+    --rojo: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fondo); color: var(--tinta);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .envoltura { max-width: 560px; margin: 0 auto; padding: 32px 20px 64px; }
+  .marca { display: block; height: 28px; margin-bottom: 28px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--tenue); margin: 0 0 20px; font-size: 15px; }
+  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .cuando { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .dato { color: var(--tenue); font-size: 14px; margin: 0; }
+  .acciones { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  button, .boton {
+    font: inherit; border-radius: 10px; padding: 0 18px; min-height: 48px;
+    cursor: pointer; border: 1px solid var(--linea); background: #fff; color: var(--tinta);
+  }
+  .cta { background: var(--morado); border-color: var(--morado); color: #fff; font-weight: 600; }
+  .cta:hover:not(:disabled) { background: var(--morado-oscuro); }
+  /* Sin esto "Confirmar cambio" se ve activo mientras todavía no hay hora elegida: el
+     atributo disabled lo bloquea, pero el botón morado invita a apretarlo y no pasa nada. */
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .peligro { color: var(--rojo); border-color: #f0c9c4; }
+  .meet { display: inline-block; text-decoration: none; line-height: 46px; }
+  .dias, .horas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .dias button, .horas button { min-height: 44px; padding: 0 14px; }
+  .dias button[aria-pressed="true"], .horas button[aria-pressed="true"] {
+    background: var(--morado); border-color: var(--morado); color: #fff;
+  }
+  .aviso { border-radius: 10px; padding: 12px 14px; font-size: 14px; margin-top: 14px; }
+  .aviso.error { background: #fdecea; color: #8c2c20; }
+  .aviso.info { background: #eef0fd; color: #3a3a6b; }
+  .oculto { display: none !important; }
+  .etiqueta { font-size: 13px; color: var(--tenue); text-transform: uppercase; letter-spacing: .04em; }
+  footer { margin-top: 28px; font-size: 13px; color: var(--tenue); }
+  footer a { color: var(--tenue); }
+</style>
+</head>
+<body>
+<div class="envoltura">
+  <img class="marca" alt="lavendi.mx"
+       src="https://lavendi.mx/wp-content/uploads/2020/08/logo-lavendi.mx_-e1596934014832.png">
+
+  {% if error %}
+    <h1>No encontramos tu cita</h1>
+    <p class="sub">
+      {% if error == "sin_token" %}
+        El enlace está incompleto. Ábrelo desde la invitación que te llegó por correo.
+      {% else %}
+        Puede que ya se haya cancelado o que el enlace haya cambiado.
+      {% endif %}
+      Si necesitas ayuda, escríbenos a <a href="mailto:contacto@lavendi.mx">contacto@lavendi.mx</a>.
+    </p>
+  {% else %}
+    <h1 id="encabezado">Tu videollamada</h1>
+    <p class="sub" id="subtitulo"></p>
+
+    <div class="tarjeta" id="tarjeta-cita">
+      <p class="etiqueta">Cuándo</p>
+      <p class="cuando" id="cuando"></p>
+      <p class="dato" id="quien"></p>
+      <div class="acciones">
+        <a class="boton meet oculto" id="meet" target="_blank" rel="noopener">Abrir Google Meet</a>
+        <button type="button" id="btn-reagendar">Cambiar la hora</button>
+        <button type="button" class="peligro" id="btn-cancelar">Cancelar</button>
+      </div>
+      <div class="aviso info oculto" id="pasada">Esta cita ya ocurrió.</div>
+      <div class="aviso error oculto" id="error-cita"></div>
+    </div>
+
+    <div class="tarjeta oculto" id="tarjeta-reagendar">
+      <p class="etiqueta">Elige el nuevo horario</p>
+      <div class="dias" id="dias"></div>
+      <div class="horas" id="horas"></div>
+      <div class="aviso info oculto" id="sin-huecos">
+        No hay horarios libres en las próximas semanas. Escríbenos y buscamos uno contigo.
+      </div>
+      <div class="acciones">
+        <button type="button" class="cta" id="btn-confirmar" disabled>Confirmar cambio</button>
+        <button type="button" id="btn-volver">Dejarla como está</button>
+      </div>
+    </div>
+
+    <div class="tarjeta oculto" id="tarjeta-final">
+      <p class="cuando" id="final-titulo"></p>
+      <p class="dato" id="final-detalle"></p>
+    </div>
+  {% endif %}
+
+  <footer>
+    lavendi.mx · <a href="mailto:contacto@lavendi.mx">contacto@lavendi.mx</a> · +52 55 5966 8622
+  </footer>
+</div>
+
+{% if not error %}
+<script>
+(function () {
+  var CITA = {{ cita_json }};
+  var DISPO = {{ disponibilidad }};
+  var TOKEN = {{ token | tojson }};
+  var CSRF = {{ csrf_token | tojson }};
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cita = (CITA && CITA.cita) || null;
+  var elegido = { fecha: null, hora: null };
+
+  function comoFecha(iso) { return new Date(iso + 'T12:00:00Z'); }
+
+  function textoLargo(fechaIso, hora) {
+    var d = comoFecha(fechaIso);
+    var dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    var meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+                 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    return dias[d.getUTCDay()] + ' ' + d.getUTCDate() + ' de ' + meses[d.getUTCMonth()] +
+           ', ' + hora + ' h';
+  }
+
+  function pintarCita() {
+    $('cuando').textContent = textoLargo(cita.fecha, cita.hora);
+    var partes = [cita.titulo];
+    if (cita.duracion_minutos) partes.push(cita.duracion_minutos + ' minutos');
+    $('quien').textContent = partes.join(' · ');
+    $('subtitulo').textContent = 'A nombre de ' + cita.nombre + '.';
+    if (cita.meet_link) { $('meet').href = cita.meet_link; $('meet').classList.remove('oculto'); }
+    if (cita.pasada) {
+      $('pasada').classList.remove('oculto');
+      $('btn-reagendar').disabled = true;
+      $('btn-cancelar').disabled = true;
+    }
+  }
+
+  function fallo(msg) {
+    var caja = $('error-cita');
+    caja.textContent = msg || 'Algo salió mal. Inténtalo de nuevo o escríbenos.';
+    caja.classList.remove('oculto');
+  }
+
+  // Frappe exige X-Frappe-CSRF-Token en todo POST de navegador, también en `allow_guest`.
+  function llamar(metodo, datos) {
+    return fetch('/api/method/frappe_chatwoot.frappe_chatwoot.api.agenda_publica.' + metodo, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Frappe-CSRF-Token': CSRF },
+      body: JSON.stringify(datos),
+    }).then(function (r) { return r.json(); }).then(function (j) { return j.message || j; });
+  }
+
+  function pintarDias() {
+    var cont = $('dias');
+    cont.innerHTML = '';
+    (DISPO.dias || []).forEach(function (d, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      var f = comoFecha(d.fecha);
+      var dd = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][f.getUTCDay()];
+      b.textContent = dd + ' ' + f.getUTCDate();
+      b.setAttribute('aria-pressed', 'false');
+      b.onclick = function () {
+        Array.prototype.forEach.call(cont.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+        b.setAttribute('aria-pressed', 'true');
+        elegido.fecha = d.fecha; elegido.hora = null;
+        $('btn-confirmar').disabled = true;
+        pintarHoras(d);
+      };
+      cont.appendChild(b);
+      if (i === 0) b.click();
+    });
+    if (!(DISPO.dias || []).length) $('sin-huecos').classList.remove('oculto');
+  }
+
+  function pintarHoras(dia) {
+    var cont = $('horas');
+    cont.innerHTML = '';
+    dia.slots.forEach(function (s) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = s.hora;
+      b.setAttribute('aria-pressed', 'false');
+      b.onclick = function () {
+        Array.prototype.forEach.call(cont.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+        b.setAttribute('aria-pressed', 'true');
+        elegido.hora = s.hora;
+        $('btn-confirmar').disabled = false;
+      };
+      cont.appendChild(b);
+    });
+  }
+
+  $('btn-reagendar').onclick = function () {
+    $('error-cita').classList.add('oculto');
+    $('tarjeta-reagendar').classList.remove('oculto');
+    if (!$('dias').children.length) pintarDias();
+    $('tarjeta-reagendar').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+
+  $('btn-volver').onclick = function () { $('tarjeta-reagendar').classList.add('oculto'); };
+
+  $('btn-cancelar').onclick = function () {
+    if (!window.confirm('¿Cancelamos tu videollamada del ' + textoLargo(cita.fecha, cita.hora) + '?')) return;
+    $('btn-cancelar').disabled = true;
+    llamar('cancelar', { token: TOKEN }).then(function (r) {
+      if (!r || !r.ok) { $('btn-cancelar').disabled = false; return fallo(r && r.mensaje); }
+      $('tarjeta-cita').classList.add('oculto');
+      $('tarjeta-reagendar').classList.add('oculto');
+      $('encabezado').textContent = 'Cita cancelada';
+      $('subtitulo').textContent = 'Ya la quitamos del calendario. Si quieres otra fecha, escríbenos y la agendamos.';
+      $('tarjeta-final').classList.remove('oculto');
+      $('final-titulo').textContent = 'Listo';
+      $('final-detalle').textContent = 'No tienes que hacer nada más.';
+    }).catch(function () { $('btn-cancelar').disabled = false; fallo(); });
+  };
+
+  $('btn-confirmar').onclick = function () {
+    if (!elegido.fecha || !elegido.hora) return;
+    $('btn-confirmar').disabled = true;
+    llamar('reagendar', { token: TOKEN, fecha: elegido.fecha, hora: elegido.hora }).then(function (r) {
+      if (!r || !r.ok) { $('btn-confirmar').disabled = false; return fallo(r && r.mensaje); }
+      cita = r.cita;
+      $('tarjeta-reagendar').classList.add('oculto');
+      pintarCita();
+      $('encabezado').textContent = 'Cambiamos tu videollamada';
+      $('tarjeta-final').classList.remove('oculto');
+      $('final-titulo').textContent = 'Nueva hora confirmada';
+      $('final-detalle').textContent = 'Te llega la actualización por correo. El enlace de Google Meet es el mismo.';
+    }).catch(function () { $('btn-confirmar').disabled = false; fallo(); });
+  };
+
+  if (cita) pintarCita();
+})();
+</script>
+{% endif %}
+</body>
+</html>

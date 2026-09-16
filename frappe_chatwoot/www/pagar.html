@@ -1,0 +1,37 @@
+{% extends "templates/web.html" %}
+
+{% block title %}Pago — lavendi.mx{% endblock %}
+
+{% block page_content %}
+<div style="max-width:520px;margin:64px auto;padding:0 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;line-height:1.5">
+  {% if estado == "gracias" and tipo == "factura" %}
+    <h1 style="font-size:24px;margin:0 0 12px">¡Listo, recibimos tu pago!</h1>
+    <p style="font-size:16px;color:#4b5563;margin:0">
+      Gracias. Si necesitas tu comprobante o tienes alguna duda, escríbenos a
+      <a href="mailto:contacto@lavendi.mx">contacto@lavendi.mx</a>.
+    </p>
+  {% elif estado == "gracias" %}
+    <h1 style="font-size:24px;margin:0 0 12px">¡Listo, recibimos tu pago!</h1>
+    <p style="font-size:16px;color:#4b5563;margin:0 0 8px">
+      El equipo de lavendi.mx te contacta en breve por WhatsApp para activar tu
+      cuenta de SofÍA GPT.
+    </p>
+    <p style="font-size:16px;color:#4b5563;margin:0">
+      Si necesitas algo antes, escríbenos a
+      <a href="mailto:contacto@lavendi.mx">contacto@lavendi.mx</a>.
+    </p>
+  {% elif estado == "plan_desconocido" %}
+    <h1 style="font-size:24px;margin:0 0 12px">No encontramos ese plan</h1>
+    <p style="font-size:16px;color:#4b5563;margin:0">
+      Escríbenos por WhatsApp o a <a href="mailto:contacto@lavendi.mx">contacto@lavendi.mx</a>
+      y te mandamos el link correcto.
+    </p>
+  {% else %}
+    <h1 style="font-size:24px;margin:0 0 12px">No pudimos abrir el pago</h1>
+    <p style="font-size:16px;color:#4b5563;margin:0">
+      Inténtalo de nuevo en un minuto. Si sigue igual, escríbenos a
+      <a href="mailto:contacto@lavendi.mx">contacto@lavendi.mx</a> y lo resolvemos.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

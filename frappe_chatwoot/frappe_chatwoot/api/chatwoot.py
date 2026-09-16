@@ -19,11 +19,14 @@ mapping doctype, since Chatwoot's search endpoint is fast enough for
 interactive (view-time) use and avoids a second place drift can occur.
 """
 
+import json
+
 import frappe
 
 from frappe_chatwoot.utils import chatwoot_client as cw
 
 ALLOWED_ROLES = ["System Manager", "Sales Manager", "Sales User"]
+MAX_ADJUNTOS = 5
 
 
 def validate_role():
@@ -221,22 +224,55 @@ def get_new_messages(conversation_id: int, since_id: int = None) -> dict:
 
 
 @frappe.whitelist()
-def send_message(conversation_id: int, content: str, inbox_id: int = None) -> dict:
+def send_message(conversation_id: int, content: str, inbox_id: int = None,
+                 adjuntos=None) -> dict:
     """Role-gated only — see get_messages' docstring on why reference-doc access
     must be bound by the caller (crm.api.chatwoot._validate_conversation_ownership).
 
-    lavendi.mx: cada respuesta humana desde aquí pausa el agente IA en esta
-    conversación (ver frappe_chatwoot.api.agentes) — un humano que interviene
-    no debe competir con el bot en la siguiente respuesta del contacto."""
+    lavendi.mx: un envío manual desde el CRM **NO** pausa al agente (decisión de
+    Alejandro, 2026-09-15). Antes sí lo pausaba, y esa pausa era dura — el bot
+    quedaba mudo hasta que alguien apretara "Reanudar". Ahora el mensaje se marca
+    como humano (`content_attributes.humano`), el agente lo toma como contexto y
+    aplica su propio freno de tiempo (`humanoRecienteEn`, 90 min) que sí se vence
+    solo. Si se quiere silencio definitivo, está el botón "Pausar agente".
+    `inbox_id` se mantiene por compatibilidad del frontend; ya no se usa.
+
+    `adjuntos` (opcional): lista JSON de `{url, nombre, mime}` — archivos ya subidos
+    al sitio por el composer. Se mandan como media nativa (multipart), no como URL
+    pegada al texto; sin esto la imagen llegaría como enlace."""
     validate_role()
     if not is_chatwoot_enabled():
         frappe.throw("Chatwoot integration is not enabled")
-    if not content or not content.strip():
+
+    content = (content or "").strip()
+    if isinstance(adjuntos, str):
+        try:
+            adjuntos = json.loads(adjuntos or "[]")
+        except ValueError:
+            adjuntos = []
+    adjuntos = adjuntos or []
+    if len(adjuntos) > MAX_ADJUNTOS:
+        frappe.throw(f"Máximo {MAX_ADJUNTOS} adjuntos por mensaje")
+
+    if not content and not adjuntos:
         frappe.throw("Message content cannot be empty")
+
     conversation_id = frappe.utils.cint(conversation_id)
-    result = cw.create_message(conversation_id, content.strip())
-    _pause_conversation(conversation_id, inbox_id)
-    return result
+    marca = {"humano": True}
+
+    if adjuntos:
+        archivos = []
+        for a in adjuntos:
+            leido = cw.leer_adjunto(a.get("url") or a.get("archivo"))
+            if leido:
+                archivos.append(leido)
+        if archivos:
+            return cw.create_message_with_attachments(
+                conversation_id, content, archivos=archivos, content_attributes=marca)
+        if not content:
+            frappe.throw("No se pudieron leer los adjuntos")
+
+    return cw.create_message(conversation_id, content, content_attributes=marca)
 
 
 def _pause_conversation(conversation_id: int, inbox_id: int = None) -> None:
@@ -522,10 +558,99 @@ def get_conversations(inbox_id=None, status: str = "open", page=1) -> list[dict]
     if status not in ("open", "resolved", "pending", "snoozed", "all"):
         frappe.throw("status inválido")
     conversations = cw.list_conversations(
-        inbox_id=frappe.utils.cint(inbox_id) or None,
+        # Aislamiento entre clientes: sin canal explicito se usa el canal de ESTE
+        # sitio, nunca 'todos'. Antes devolvia None y Chatwoot entregaba las
+        # conversaciones de todos los inboxes de la cuenta compartida (Six Gardens
+        # aparecia en la bandeja de lavendi.mx). Ver docs/project_agente_whatsapp.md.
+        inbox_id=frappe.utils.cint(inbox_id) or _default_inbox_id(),
         status=status,
         page=frappe.utils.cint(page) or 1,
     )
     shaped = [_shape_conversation(c) for c in conversations]
     shaped.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
     return shaped
+
+
+@frappe.whitelist()
+def search_conversations(q: str = "", limit=40) -> list[dict]:
+    """Buscador de la bandeja: encuentra conversaciones por nombre, teléfono o
+    correo del contacto, ignorando el filtro de estado y canal de la vista.
+
+    Por qué no basta filtrar en el navegador lo que ya está cargado: la bandeja
+    pinta la página 1 de Chatwoot (25 conversaciones) del estado y canal
+    activos. Lo que el equipo busca casi siempre queda fuera de eso — un hilo
+    resuelto de hace dos semanas, o de otro canal.
+
+    Chatwoot no expone búsqueda de conversaciones por texto libre, así que se
+    busca el CONTACTO (/contacts/search cubre nombre, correo y teléfono) y de
+    ahí se traen sus conversaciones. Mismo motor que usa el buscador global
+    (api.buscar), pero devolviendo conversaciones con la forma completa de la
+    bandeja para que la lista y el hilo se pinten igual que siempre.
+    """
+    validate_role()
+    if not is_chatwoot_enabled():
+        return []
+    q = (q or "").strip()
+    # Mismo umbral que buscar_global: con 1 carácter Chatwoot devuelve cientos
+    # de contactos y la búsqueda se vuelve inútil además de lenta.
+    if len(q) < 2:
+        return []
+
+    try:
+        contactos = cw.search_contacts(q)[:10]
+    except cw.ChatwootAPIError as exc:
+        frappe.log_error(title="search_conversations: Chatwoot no responde", message=str(exc))
+        # A diferencia de la bandeja, aquí NO se degrada a lista vacía: "sin
+        # resultados" y "no pude buscar" se ven igual en pantalla y llevan a
+        # concluir que la conversación no existe.
+        frappe.throw("No se pudo buscar en Chatwoot")
+
+    vistas = set()
+    filas = []
+    for contacto in contactos:
+        try:
+            convs = cw.get_conversations_for_contact(contacto.get("id"))
+        except cw.ChatwootAPIError:
+            continue
+        for conv in convs:
+            cid = conv.get("id")
+            if not cid or cid in vistas:
+                continue
+            vistas.add(cid)
+            filas.append(_shape_conversation(conv))
+
+    # El buscador ignora a proposito el filtro de estado/canal de la vista, pero NO
+    # debe cruzar de cliente: se limita al inbox de este sitio (mismo criterio que
+    # get_conversations). Ver docs/project_agente_whatsapp.md.
+    scoped_inbox = _default_inbox_id()
+    filas = [f for f in filas if f.get("inbox_id") == scoped_inbox]
+    filas.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
+    return filas[: frappe.utils.cint(limit) or 40]
+
+
+@frappe.whitelist()
+def adjunto(path: str, nombre: str = None):
+    """Sirve un adjunto de una conversación (foto, PDF, audio, video).
+
+    Añadido por lavendi.mx el 2026-09-10, después de que Alejandro reportara que
+    los archivos que manda un cliente por WhatsApp "no se reflejan" en el CRM.
+    Sí llegaban — están completos en Chatwoot — pero eran inalcanzables desde el
+    navegador: sus URLs apuntan al host interno de Coolify por http, y una página
+    servida por https no carga contenido mixto.
+
+    Se responde `inline` y no como descarga: si no, cada foto de una conversación
+    se bajaría al disco en vez de verse en el hilo.
+    """
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+
+    contenido, content_type = cw.fetch_attachment(path)
+    frappe.local.response.filename = nombre or path.rsplit("/", 1)[-1] or "adjunto"
+    frappe.local.response.filecontent = contenido
+    frappe.local.response.content_type = content_type
+    # "download" es la llave que Frappe mapea a `as_raw` — la única que respeta
+    # `content_type` y `display_content_as`. Con "inline", el navegador la pinta en
+    # el hilo en vez de bajarla al disco.
+    frappe.local.response.type = "download"
+    frappe.local.response.display_content_as = "inline"

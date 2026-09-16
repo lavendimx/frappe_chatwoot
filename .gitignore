@@ -3,3 +3,16 @@ __pycache__/
 *.egg-info/
 .DS_Store
 node_modules/
+
+# lavendi: respaldos, datos de clientes y artefactos locales (no versionar)
+*.bak
+*.bak-*
+*.orig
+*.jsonl
+oportunidades.jsonl
+pvp_paso_por_deal.json
+secuencias_pvp_deals.json
+secuencias_pvp_pasos.json
+mapa_customer_ghl.json
+cleanup_test_data.py
+frappe_chatwoot/frappe_chatwoot/api/_test_write
