@@ -198,3 +198,13 @@ fixtures += [
     {"dt": "CRM Lead Source"},
     {"dt": "CRM Lost Reason"},
 ]
+
+# ---------------------------------------------------------------------------
+# after_migrate — cierra el hueco que los fixtures no pueden cerrar
+# ---------------------------------------------------------------------------
+# Los fixtures hacen upsert, no borran. frappe/crm instala 22 etapas de embudo
+# en ingles; el fixture agrega/actualiza las 16 de lavendi.mx pero dejaria las
+# 6 nativas que produccion borro. Ver utils/provisionamiento.py.
+after_migrate = [
+    "frappe_chatwoot.utils.provisionamiento.ajustar_embudo",
+]

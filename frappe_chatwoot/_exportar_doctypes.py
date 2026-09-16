@@ -34,7 +34,7 @@ DOCTYPES = [
 ]
 
 MODULE = "Frappe Chatwoot"
-BASE = "/home/frappe/frappe-bench/apps/frappe_chatwoot/frappe_chatwoot/doctype"
+BASE = "/home/frappe/frappe-bench/apps/frappe_chatwoot/frappe_chatwoot/frappe_chatwoot/doctype"
 
 VOLATILE = ("_user_tags", "_comments", "_assign", "_liked_by", "__islocal", "__unsaved")
 
@@ -72,7 +72,7 @@ def ejecutar():
 
         controlador = os.path.join(carpeta, scrub + ".py")
         if not os.path.exists(controlador):
-            clase = "".join(p.capitalize() for p in scrub.split("_"))
+            clase = name.replace(" ", "").replace("-", "")
             with open(controlador, "w") as f:
                 f.write(
                     "# Copyright (c) 2026, lavendi.mx\n"

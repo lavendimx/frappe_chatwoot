@@ -4,5 +4,5 @@
 from frappe.model.document import Document
 
 
-class KbInbox(Document):
+class KBSource(Document):
 	pass
