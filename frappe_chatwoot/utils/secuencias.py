@@ -135,6 +135,7 @@ import time
 import frappe
 
 from . import chatwoot_client as cw
+from .busqueda import condiciones_sql
 
 MAX_CORRIDA_DEFAULT = 20
 
@@ -1026,6 +1027,25 @@ def listar_inscripciones(secuencia: str | None = None, estado: str | None = None
         limit_page_length=0,
     )
 
+    # Nombre/teléfono/correo del contacto para el buscador de la pantalla. Una
+    # sola consulta para todos los contactos, no una por inscripción.
+    ids = {f["contacto"] for f in filas if f.get("contacto")}
+    datos_contacto = {}
+    if ids:
+        for c in frappe.get_all(
+            "Contact", filters={"name": ["in", list(ids)]},
+            fields=["name", "first_name", "last_name", "mobile_no", "email_id"],
+            limit_page_length=0,
+        ):
+            datos_contacto[c["name"]] = c
+    for ins in filas:
+        c = datos_contacto.get(ins.get("contacto")) or {}
+        ins["contacto_nombre"] = " ".join(
+            x for x in [c.get("first_name"), c.get("last_name")] if x
+        ).strip() or (ins.get("contacto") or "")
+        ins["contacto_telefono"] = c.get("mobile_no")
+        ins["contacto_email"] = c.get("email_id")
+
     # Los pasos viven en el doc padre; se cargan una vez por secuencia (no N consultas).
     pasos_por_sec = {}
     for ins in filas:
@@ -1106,22 +1126,36 @@ def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) ->
     q = (q or "").strip()
     if len(q) < 2:
         return []
+    # Búsqueda inteligente (utils/busqueda): parcial, sin acentos, por palabras
+    # sueltas en cualquier orden y por dígitos del teléfono. Antes era un solo
+    # `LIKE %q%`: "moctezuma jose" no encontraba "José Moctezuma" y un teléfono
+    # con espacios no encontraba nada.
+    cond, params = condiciones_sql(
+        q,
+        campos=[
+            "d.name",
+            "CONCAT(IFNULL(c.first_name, ''), ' ', IFNULL(c.last_name, ''))",
+            "c.company_name",
+            "c.email_id",
+            "c.mobile_no",
+        ],
+        campos_telefono=["c.mobile_no"],
+    )
+    if not cond:
+        return []
+    params["lim"] = frappe.utils.cint(limite) or 20
     filas = frappe.db.sql(
-        """
+        f"""
         SELECT d.name, d.contact, d.organization, d.ghl_status, d.ghl_producto,
                d.chatwoot_conversation_id, d.deal_value,
                c.first_name, c.last_name, c.mobile_no, c.email_id, c.company_name
         FROM `tabCRM Deal` d
         LEFT JOIN `tabContact` c ON c.name = d.contact
-        WHERE d.name LIKE %(q)s
-           OR CONCAT(IFNULL(c.first_name, ''), ' ', IFNULL(c.last_name, '')) LIKE %(q)s
-           OR c.company_name LIKE %(q)s
-           OR c.mobile_no LIKE %(q)s
-           OR c.email_id LIKE %(q)s
+        WHERE {cond}
         ORDER BY d.modified DESC
         LIMIT %(lim)s
         """,
-        {"q": f"%{q}%", "lim": frappe.utils.cint(limite) or 20},
+        params,
         as_dict=True,
     )
     inscritos = set()

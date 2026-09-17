@@ -7707,5 +7707,18 @@
   "name": "840hfcqu57",
   "source_text": "Add Deal Value...",
   "translated_text": "Agregar valor de la oportunidad..."
+ },
+ {
+  "context": null,
+  "contributed": 0,
+  "contribution_docname": null,
+  "contribution_status": "",
+  "docstatus": 0,
+  "doctype": "Translation",
+  "language": "es",
+  "modified": "2026-09-17 07:20:04.963248",
+  "name": "6hhghdjpnl",
+  "source_text": "Add Nombre de la oportunidad...",
+  "translated_text": "Agregar nombre de la oportunidad..."
  }
 ]

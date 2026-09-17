@@ -254,5 +254,21 @@
   "property_type": "Check",
   "row_name": null,
   "value": "0"
+ },
+ {
+  "default_value": null,
+  "doc_type": "CRM Deal",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocType",
+  "field_name": null,
+  "is_system_generated": 0,
+  "modified": "2026-09-17 07:12:31.031019",
+  "module": null,
+  "name": "CRM Deal-main-title_field",
+  "property": "title_field",
+  "property_type": "Data",
+  "row_name": null,
+  "value": "deal_name"
  }
 ]
