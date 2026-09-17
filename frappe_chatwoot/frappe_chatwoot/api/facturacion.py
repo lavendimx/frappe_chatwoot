@@ -511,6 +511,62 @@ FRECUENCIAS = {
 }
 
 MARCA_RECURRENTE = "Recurrente creada desde el CRM"
+MARCA_FACTURA_CRM = "Factura creada desde el CRM"
+
+# Meses que avanza cada frecuencia. Semanal/diaria se quedan fuera: nadie las
+# usa desde el CRM (ver `frecuencias` en NuevaRecurrenteDialog.vue) y su
+# cadencia no se presta al cálculo de mes exacto de abajo.
+MESES_POR_FRECUENCIA = {"Monthly": 1, "Quarterly": 3, "Half-yearly": 6, "Yearly": 12}
+
+
+def _start_date_para_emision(objetivo, frecuencia: str):
+    """`start_date` de Auto Repeat que hace que su PRIMERA emisión caiga
+    exactamente en `objetivo`.
+
+    Frappe ancla la cadencia así (`auto_repeat.get_next_schedule_date` /
+    `get_next_date`): `next_schedule_date = start_date + relativedelta(months=
+    periodo, day=repeat_on_day)`. El día de `start_date` no importa, solo su
+    MES — así que basta con que `start_date` caiga en el mes exacto anterior
+    a `objetivo` (`objetivo - periodo` meses).
+
+    El riesgo es `Auto Repeat.before_insert`, que empuja `start_date` a hoy si
+    se manda una fecha pasada: si el mes necesario ya pasó, ese empujón
+    cambiaría el mes del ancla y la emisión ya no caería en `objetivo`. Por
+    eso, cuando el mes necesario coincide con el de hoy, se usa `hoy` mismo
+    (no es "pasado", así que no lo empuja); cuando es un mes futuro, cualquier
+    día de ese mes ya es posterior a hoy y tampoco lo toca.
+
+    Devuelve `None` si `objetivo` no es alcanzable — cae este mes o antes. Es
+    una restricción real de Frappe (una recurrente nueva no puede tener su
+    primera emisión antes del mes que sigue a hoy), no un límite nuestro.
+    """
+    periodo = MESES_POR_FRECUENCIA.get(frecuencia)
+    if not periodo:
+        frappe.throw("Frecuencia sin soporte para fecha exacta")
+    objetivo = frappe.utils.getdate(objetivo)
+    hoy = frappe.utils.getdate(frappe.utils.today())
+
+    idx_objetivo = objetivo.year * 12 + objetivo.month
+    idx_hoy = hoy.year * 12 + hoy.month
+    idx_necesario = idx_objetivo - periodo
+
+    if idx_necesario < idx_hoy:
+        return None
+    if idx_necesario == idx_hoy:
+        return hoy
+    anio, mes = divmod(idx_necesario - 1, 12)
+    return frappe.utils.getdate(f"{anio}-{mes + 1:02d}-01")
+
+
+def _primera_emision_posible(frecuencia: str, dia: int):
+    """La fecha más próxima que sí es alcanzable, para el mensaje de error de
+    `_start_date_para_emision` cuando `objetivo` no lo es."""
+    periodo = MESES_POR_FRECUENCIA[frecuencia]
+    hoy = frappe.utils.getdate(frappe.utils.today())
+    idx = hoy.year * 12 + hoy.month + periodo
+    anio, mes = divmod(idx - 1, 12)
+    return frappe.utils.getdate(f"{anio}-{mes + 1:02d}-01") + frappe.utils.relativedelta(day=dia)
+
 
 # La migración cargó las 226 facturas con un solo concepto genérico y dejó el
 # nombre real del servicio de GHL ("Sofía GPT - Estrublock") en la descripción.
@@ -714,24 +770,26 @@ def _crear_auto_repeat(factura: str, frecuencia: str, dia, inicio: str, fin: str
 
 
 @frappe.whitelist()
-def crear_desde_factura(factura: str, frecuencia: str = "Monthly", dia=None,
-                        inicio: str = None, fin: str = None, dias_credito: int = None,
-                        forzar: int = 0) -> dict:
+def crear_desde_factura(factura: str, frecuencia: str = "Monthly",
+                        primera_emision: str = None, fin: str = None,
+                        dias_credito: int = None, forzar: int = 0) -> dict:
     """Convierte una factura ya emitida en la plantilla de una recurrente.
 
     Es la vía correcta para migrar las plantillas de GHL: la factura que GHL ya
     emitió este mes se vuelve el molde, y ERPNext emite la siguiente. No genera
-    ningún cargo nuevo hoy — `next_schedule_date` nunca cae en el pasado, así
-    que una fecha de inicio vieja no dispara facturas retroactivas.
+    ningún cargo nuevo hoy.
 
-    OJO CON EL CALENDARIO AL MIGRAR: Frappe empuja `start_date` a hoy si se le
-    manda una fecha pasada (`Auto Repeat.before_insert`), así que la fecha de
-    alta original de GHL no se puede conservar; lo que gobierna la cadencia es
-    el día del mes. La consecuencia práctica es que **si el día de cobro de este
-    mes todavía no llega, la primera emisión de ERPNext se va al mes siguiente**
-    (migrar el día 10 una plantilla que cobra el 17 salta el 17 de este mes).
-    Por eso cada plantilla se migra *después* de su emisión del mes, no antes, y
-    la respuesta trae `proxima` para verificarlo antes de cancelar la de GHL.
+    `primera_emision` es la fecha EXACTA en la que debe caer la próxima
+    factura que ERPNext genere — no "el día del mes", una fecha real. Se
+    resuelve con `_start_date_para_emision` y se verifica después de crear la
+    plantilla que `next_schedule_date` cayó donde se pidió; si no coincide se
+    revierte y se avisa, nunca se deja una recurrente cobrando un día distinto
+    al que el usuario pidió.
+
+    Si se omite, se conserva el comportamiento de siempre: se hereda el día
+    de la propia factura molde y Frappe decide el mes (empuja al que sigue si
+    el de este mes ya pasó) — es la vía rápida para "lo antes posible" sin
+    pensar en calendarios.
     """
     validate_role()
     if frecuencia not in FRECUENCIAS:
@@ -759,8 +817,18 @@ def crear_desde_factura(factura: str, frecuencia: str = "Monthly", dia=None,
                 f"que sí quieres dos — dos plantillas vivas le facturan dos veces."
             )
 
-    inicio = inicio or str(inv.posting_date)
-    if dia in (None, "", 0):
+    if primera_emision:
+        objetivo = frappe.utils.getdate(primera_emision)
+        inicio = _start_date_para_emision(objetivo, frecuencia)
+        if inicio is None:
+            minimo = _primera_emision_posible(frecuencia, objetivo.day)
+            frappe.throw(
+                f"La primera emisión no puede ser antes del "
+                f"{frappe.utils.formatdate(minimo)}. Elige esa fecha o una posterior."
+            )
+        dia = objetivo.day
+    else:
+        inicio = str(inv.posting_date)
         dia = frappe.utils.getdate(inv.posting_date).day
 
     # El plazo se hereda de la propia factura molde si no lo dicen: es el que ya
@@ -772,41 +840,28 @@ def crear_desde_factura(factura: str, frecuencia: str = "Monthly", dia=None,
         )
     plazo = _asegurar_credito(inv.customer, dias_credito)
 
-    name = _crear_auto_repeat(factura, frecuencia, dia, inicio, fin)
+    name = _crear_auto_repeat(factura, frecuencia, dia, str(inicio), fin)
+
+    if primera_emision:
+        real = frappe.db.get_value("Auto Repeat", name, "next_schedule_date")
+        if frappe.utils.getdate(real) != objetivo:
+            frappe.delete_doc("Auto Repeat", name, force=True, ignore_permissions=True)
+            frappe.db.set_value("Sales Invoice", factura, "auto_repeat", "")
+            frappe.throw(
+                f"No se pudo fijar la primera emisión el "
+                f"{frappe.utils.formatdate(objetivo)}: ERPNext calculó "
+                f"{frappe.utils.formatdate(real)}. Intenta con esa fecha."
+            )
+
     return {"ok": True, "recurrente": name, "plazo_pago": plazo, **detalle_recurrente(name)}
 
 
-@frappe.whitelist()
-def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Monthly",
-                     dia=None, dias_credito: int = 15, fin: str = None,
-                     forzar: int = 0) -> dict:
-    """Crea una recurrente desde cero.
-
-    Emite HOY la primera factura, que es la que queda de molde. ERPNext no acepta
-    fecha de emisión futura en una Sales Invoice, así que no hay forma de dejar
-    una recurrente "armada para empezar el mes que viene" sin un primer
-    documento real. La interfaz lo dice antes de guardar.
-    """
-    validate_role()
-    if frecuencia not in FRECUENCIAS:
-        frappe.throw("Frecuencia inválida")
-    monto = round(float(monto), 2)
-    if monto <= 0:
-        frappe.throw("El monto debe ser mayor a cero")
-    if not frappe.db.exists("Customer", customer):
-        frappe.throw("El cliente no existe")
-
-    if not frappe.utils.cint(forzar):
-        dup = _duplicado_recurrente(customer, monto)
-        if dup:
-            nombre = frappe.db.get_value("Customer", customer, "customer_name")
-            frappe.throw(
-                f"{nombre} ya tiene una recurrente activa ({dup['name']}, "
-                f"${dup['monto']:,.2f}). Cancélala primero o marca que sí quieres dos."
-            )
-
-    _asegurar_credito(customer, dias_credito)
-
+def _emitir_factura(customer: str, concepto: str, monto: float, emision, dias_credito,
+                    marca: str):
+    """Arma y somete una Sales Invoice de un solo concepto. Compartida por
+    `crear_recurrente` (donde esta factura queda de molde) y `crear_factura`
+    (donde es la factura completa). `emision` puede ser hoy o una fecha
+    futura — ERPNext sí acepta `posting_date` futuro en Sales Invoice."""
     company = frappe.defaults.get_user_default("Company") or frappe.db.get_single_value(
         "Global Defaults", "default_company"
     )
@@ -815,18 +870,17 @@ def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Mon
     )
     centro_costo = frappe.db.get_value("Company", company, "cost_center")
 
-    hoy = frappe.utils.today()
     inv = frappe.get_doc({
         "doctype": "Sales Invoice",
         "customer": customer,
         "company": company,
         "currency": "MXN",
         "conversion_rate": 1,
-        "posting_date": hoy,
-        "due_date": frappe.utils.add_days(hoy, frappe.utils.cint(dias_credito) or 15),
+        "posting_date": str(emision),
+        "due_date": str(frappe.utils.add_days(emision, frappe.utils.cint(dias_credito) or 15)),
         "set_posting_time": 1,
         "disable_rounded_total": 1,
-        "remarks": MARCA_RECURRENTE,
+        "remarks": marca,
         "items": [{
             "item_name": concepto[:140],
             "description": concepto[:255],
@@ -840,12 +894,81 @@ def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Mon
     inv.set_missing_values()
     inv.insert()
     inv.submit()
+    return inv
 
-    if dia in (None, "", 0):
-        dia = frappe.utils.getdate(hoy).day
-    name = _crear_auto_repeat(inv.name, frecuencia, dia, hoy, fin)
+
+def _validar_monto_y_cliente(customer: str, monto) -> float:
+    monto = round(float(monto), 2)
+    if monto <= 0:
+        frappe.throw("El monto debe ser mayor a cero")
+    if not frappe.db.exists("Customer", customer):
+        frappe.throw("El cliente no existe")
+    return monto
+
+
+@frappe.whitelist()
+def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Monthly",
+                     emision: str = None, dias_credito: int = 15, fin: str = None,
+                     forzar: int = 0) -> dict:
+    """Crea una recurrente desde cero.
+
+    `emision` es la fecha exacta de la primera factura (el molde) — hoy por
+    default, pero puede ser futura. No hace falta el ajuste de mes de
+    `crear_desde_factura`: al no haber una factura previa que empuje el
+    calendario, el `start_date` de la recurrente es la propia fecha de
+    emisión, y la siguiente ya cae justo un período después.
+    """
+    validate_role()
+    if frecuencia not in FRECUENCIAS:
+        frappe.throw("Frecuencia inválida")
+    monto = _validar_monto_y_cliente(customer, monto)
+
+    hoy = frappe.utils.getdate(frappe.utils.today())
+    emision = frappe.utils.getdate(emision) if emision else hoy
+    if emision < hoy:
+        frappe.throw("La fecha de emisión no puede ser anterior a hoy")
+
+    if not frappe.utils.cint(forzar):
+        dup = _duplicado_recurrente(customer, monto)
+        if dup:
+            nombre = frappe.db.get_value("Customer", customer, "customer_name")
+            frappe.throw(
+                f"{nombre} ya tiene una recurrente activa ({dup['name']}, "
+                f"${dup['monto']:,.2f}). Cancélala primero o marca que sí quieres dos."
+            )
+
+    _asegurar_credito(customer, dias_credito)
+    inv = _emitir_factura(customer, concepto, monto, emision, dias_credito, MARCA_RECURRENTE)
+
+    name = _crear_auto_repeat(inv.name, frecuencia, emision.day, str(emision), fin)
     d = detalle_recurrente(name)
     d.update({"ok": True, "recurrente": name, "primera_factura": inv.name})
+    return d
+
+
+@frappe.whitelist()
+def crear_factura(customer: str, concepto: str, monto, emision: str = None,
+                  dias_credito: int = 15) -> dict:
+    """Crea y emite una factura simple, sin recurrencia.
+
+    Es la alta simplificada desde el CRM: 5 datos (cliente, concepto, monto,
+    fecha de emisión, días de crédito) en vez del formulario completo del
+    Desk de ERPNext (`/app/sales-invoice/new`), que expone impuestos, moneda,
+    lista de precios y series que no aplican a este uso. Mismo alcance que el
+    resto del módulo: sin timbrado CFDI ni envío al cliente (ver encabezado
+    del archivo) — quien necesite eso sigue yendo al Desk.
+    """
+    validate_role()
+    monto = _validar_monto_y_cliente(customer, monto)
+
+    hoy = frappe.utils.getdate(frappe.utils.today())
+    emision = frappe.utils.getdate(emision) if emision else hoy
+    if emision < hoy:
+        frappe.throw("La fecha de emisión no puede ser anterior a hoy")
+
+    inv = _emitir_factura(customer, concepto, monto, emision, dias_credito, MARCA_FACTURA_CRM)
+    d = detalle(inv.name)
+    d["ok"] = True
     return d
 
 
