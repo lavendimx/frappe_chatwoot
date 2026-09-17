@@ -206,3 +206,16 @@ def sincronizar_todos(apply: int = 0, agresivo: int = 0) -> dict:
         "cambios": len(cambios),
         "detalle": cambios[:60],
     }
+
+
+def sincronizar_organizacion(doc, method=None):
+    """doc_event (validate) de `Contact`: si `crm_organization` (Link al
+    catálogo, agregado 2026-09-17 para reemplazar el texto libre) está puesto,
+    refleja su nombre en `company_name` — el campo que ya leen el front
+    (getOrganization(), listas, campañas de email) y los buscadores.
+    `CRM Organization` se autonombra por `organization_name`, así que el
+    valor del Link YA ES el texto: no hace falta ir a buscarlo.
+    """
+    org = doc.get("crm_organization")
+    if org and doc.get("company_name") != org:
+        doc.company_name = org

@@ -21,8 +21,8 @@
   "docstatus": 0,
   "doctype": "CRM Fields Layout",
   "dt": "Contact",
-  "layout": "[{\"columns\": [{\"fields\": [\"first_name\"], \"name\": \"column_cSxf\"}, {\"fields\": [\"last_name\"], \"name\": \"column_yBc7\"}], \"hideBorder\": true, \"name\": \"full_name_section\"}, {\"columns\": [{\"fields\": [\"email_id\"], \"name\": \"column_tH3L\"}], \"hideBorder\": true, \"name\": \"email_section\"}, {\"columns\": [{\"fields\": [\"mobile_no\"], \"name\": \"column_lrfI\"}], \"hideBorder\": true, \"name\": \"mobile_gender_section\"}, {\"columns\": [{\"fields\": [\"company_name\"], \"name\": \"column_S0J8\"}], \"hideBorder\": true, \"name\": \"organization_section\"}]",
-  "modified": "2026-09-16 12:41:42.248591",
+  "layout": "[{\"columns\": [{\"fields\": [\"first_name\"], \"name\": \"column_cSxf\"}, {\"fields\": [\"last_name\"], \"name\": \"column_yBc7\"}], \"hideBorder\": true, \"name\": \"full_name_section\"}, {\"columns\": [{\"fields\": [\"email_id\"], \"name\": \"column_tH3L\"}], \"hideBorder\": true, \"name\": \"email_section\"}, {\"columns\": [{\"fields\": [\"mobile_no\"], \"name\": \"column_lrfI\"}], \"hideBorder\": true, \"name\": \"mobile_gender_section\"}, {\"columns\": [{\"fields\": [\"crm_organization\", \"company_name\"], \"name\": \"column_S0J8\"}], \"hideBorder\": true, \"name\": \"organization_section\"}]",
+  "modified": "2026-09-17 07:50:39.297397",
   "name": "Contact-Quick Entry",
   "type": "Quick Entry"
  },
@@ -93,8 +93,8 @@
   "docstatus": 0,
   "doctype": "CRM Fields Layout",
   "dt": "Contact",
-  "layout": "[{\"columns\": [{\"fields\": [\"first_name\", \"last_name\", \"email_id\", \"mobile_no\", \"company_name\"], \"name\": \"column_eIWl\"}], \"label\": \"Details\", \"name\": \"details_section\", \"opened\": true}]",
-  "modified": "2026-09-16 12:41:42.252196",
+  "layout": "[{\"columns\": [{\"fields\": [\"first_name\", \"last_name\", \"email_id\", \"mobile_no\", \"crm_organization\", \"company_name\"], \"name\": \"column_eIWl\"}], \"label\": \"Details\", \"name\": \"details_section\", \"opened\": true}]",
+  "modified": "2026-09-17 07:50:39.295451",
   "name": "Contact-Side Panel",
   "type": "Side Panel"
  },

@@ -92,6 +92,8 @@ doc_events = {
     "Contact": {
         "on_update": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
         "after_insert": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
+        # crm_organization (Link al catalogo, 2026-09-17) -> company_name.
+        "validate": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_organizacion",
     },
     # CRM Task → contacto/organización/oportunidad: `CRM Task` solo trae un
     # vínculo, así que en el panel de Tareas se veían aisladas (2026-09-15).

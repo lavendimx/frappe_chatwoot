@@ -239,3 +239,23 @@ def editar_cita(
     if not resultado.get("ok"):
         frappe.throw(resultado.get("mensaje") or "No se pudo editar la cita.")
     return resultado
+
+
+@frappe.whitelist()
+def citas_de_contacto(contacto: str) -> list[dict]:
+    """Citas (Reunion Agendada) de un Contact — para el panel de contexto de
+    Conversaciones (Alejandro, 2026-09-17): antes solo se veían en la pantalla
+    Calendario, sin cruce con el hilo del contacto."""
+    validate_role()
+    if not contacto:
+        return []
+    return frappe.get_all(
+        "Reunion Agendada",
+        filters={"crm_contacto": contacto},
+        fields=[
+            "name", "nombre_participante", "start_datetime", "end_datetime",
+            "motivo", "meet_link", "origen",
+        ],
+        order_by="start_datetime desc",
+        limit_page_length=20,
+    )
