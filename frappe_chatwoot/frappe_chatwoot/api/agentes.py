@@ -25,7 +25,16 @@ def get_active_agentes() -> dict:
     rows = frappe.get_all(
         "Agente IA",
         filters={"active": 1},
-        fields=["name", "client_name", "provider", "model", "system_prompt", "calendar_id", "shadow_mode"],
+        fields=[
+            "name",
+            "client_name",
+            "provider",
+            "model",
+            "system_prompt",
+            "calendar_id",
+            "shadow_mode",
+            "gate_intencion",
+        ],
     )
     return {
         row.name: {
@@ -35,6 +44,9 @@ def get_active_agentes() -> dict:
             "systemPrompt": row.system_prompt,
             "calendarId": row.calendar_id or None,
             "shadowMode": bool(row.shadow_mode),
+            # Sofía Lite: el número del cliente también recibe proveedores, personal y
+            # vecinos. Apagado por default — los inboxes que ya existen no cambian.
+            "gateIntencion": bool(row.gate_intencion),
         }
         for row in rows
     }
