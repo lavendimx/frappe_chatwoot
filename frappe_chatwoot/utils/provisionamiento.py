@@ -67,6 +67,7 @@ def ajustar_sitio():
         aplicar_fixtures_erpnext,
         deduplicar_web_form_fields,
         _branding_plataforma,
+        _idioma_plataforma,
         _usuario_servicio_agente,
     ):
         try:
@@ -167,6 +168,24 @@ def _branding_plataforma():
         for campo, valor in BRANDING.items():
             ws.set(campo, valor)
         ws.save(ignore_permissions=True)
+
+
+def _idioma_plataforma():
+    """Idioma por defecto del sitio: espanol.
+
+    Sin esto un sitio nuevo nace con `System Settings.language` vacio y el SPA del
+    CRM cae a ingles: los textos propios del front van en espanol (parche de la
+    SPA), pero TODO lo que rotula el backend —etiquetas de campo, "Crear
+    oportunidad", "Valor de la oportunidad", filtros— sale en ingles porque la
+    `Translation` solo se aplica si el idioma resuelto es `es`. Verificado en
+    sixgardens el 2026-09-17.
+
+    Solo si esta vacio: un cliente que quiera ingles no se pisa. El idioma por
+    USUARIO (`User.language`) sigue mandando por encima de este default.
+    """
+    if frappe.db.get_single_value("System Settings", "language"):
+        return
+    frappe.db.set_single_value("System Settings", "language", "es")
 
 
 def _usuario_servicio_agente():
