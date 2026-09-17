@@ -29,6 +29,7 @@ si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename qu
 choca hacia que se perdieran los borrados de la misma corrida).
 """
 
+import json
 import os
 import shutil
 
@@ -58,6 +59,46 @@ VIEJO, NUEVO = "4to Seguiiento", "4to Seguimiento"
 
 WEB_FORMS_CON_DUPLICADOS = ["base-de-conocimiento", "solicita-una-cotización-ahora"]
 
+# --- UX de la plataforma que NO viaja por fixture -------------------------
+# Los quick filters viven en `CRM Global Settings` (registro con `name` aleatorio,
+# unicidad por `dt` + `type`): como fixture duplicaria, asi que va aqui. El CRM
+# instala por defecto los 4 de abajo; crm.lavendi.mx los dejo en solo `status`
+# (cierre 18) porque el buscador de texto ya cubre organizacion/correo.
+QUICK_FILTERS_DEAL = ["status"]
+QUICK_FILTERS_DEAL_DEFAULT = ["organization", "status", "probability", "email"]
+
+# Vistas guardadas publicas que recibe un sitio de cliente SIN vistas propias.
+# La "Embudo de ventas" de lavendi.mx filtra `ghl_status = open` (dato migrado de
+# GHL); un cliente sin GHL tendria el kanban vacio, asi que aqui filtra por
+# `status not in [Won, Lost]`, que funciona en cualquier sitio.
+_VISTA_COLUMNAS = [
+    {"label": "Organización", "type": "Link", "key": "organization", "options": "CRM Organization", "width": "12rem"},
+    {"label": "Etapa", "type": "Link", "key": "status", "options": "CRM Deal Status", "width": "11rem"},
+    {"label": "Valor", "type": "Currency", "key": "deal_value", "align": "right", "width": "9rem"},
+    {"label": "Responsable", "type": "Link", "key": "deal_owner", "options": "User", "width": "11rem"},
+    {"label": "Teléfono", "type": "Data", "key": "mobile_no", "width": "11rem"},
+    {"label": "Modificado", "type": "Datetime", "key": "modified", "width": "9rem"},
+]
+_VISTA_FILAS = ["name", "organization", "status", "deal_value", "currency", "deal_owner", "mobile_no", "modified", "_assign"]
+_ABIERTAS = {"status": ["not in", ["Won", "Lost"]]}
+
+VISTAS_CLIENTE = [
+    {
+        "label": "Embudo de ventas", "type": "kanban", "route_name": "Deals",
+        "is_default": 1, "pinned": 1, "filters": _ABIERTAS, "order_by": "modified desc",
+        "column_field": "status", "title_field": "organization",
+        "kanban_fields": ["deal_value", "deal_owner", "mobile_no", "modified"],
+    },
+    {
+        "label": "Oportunidades abiertas", "type": "list", "route_name": None,
+        "is_default": 0, "pinned": 1, "filters": _ABIERTAS, "order_by": "modified desc",
+    },
+    {
+        "label": "Ganadas", "type": "list", "route_name": None,
+        "is_default": 0, "pinned": 0, "filters": {"status": "Won"}, "order_by": "closed_date desc",
+    },
+]
+
 
 def ajustar_sitio():
     """Punto de entrada de `after_migrate`. Nunca lanza."""
@@ -68,6 +109,8 @@ def ajustar_sitio():
         deduplicar_web_form_fields,
         _branding_plataforma,
         _idioma_plataforma,
+        _quick_filters_deal,
+        _vistas_por_defecto,
         _usuario_servicio_agente,
     ):
         try:
@@ -186,6 +229,66 @@ def _idioma_plataforma():
     if frappe.db.get_single_value("System Settings", "language"):
         return
     frappe.db.set_single_value("System Settings", "language", "es")
+
+
+def _quick_filters_deal():
+    """Deja los quick filters de `CRM Deal` como en crm.lavendi.mx.
+
+    Solo si el sitio todavia tiene los 4 por defecto del CRM: un cliente que ya
+    los ajusto a su gusto no se pisa. No toca `in_standard_filter` de los
+    DocFields — eso viaja por Property Setter (fixture) y ya coincide.
+    """
+    existente = frappe.db.exists("CRM Global Settings", {"dt": "CRM Deal", "type": "Quick Filters"})
+    if existente:
+        actual = frappe.parse_json(frappe.db.get_value("CRM Global Settings", existente, "json") or "[]")
+        if actual != QUICK_FILTERS_DEAL_DEFAULT:
+            return
+        frappe.db.set_value("CRM Global Settings", existente, "json", json.dumps(QUICK_FILTERS_DEAL))
+        return
+    frappe.get_doc(
+        {
+            "doctype": "CRM Global Settings",
+            "dt": "CRM Deal",
+            "type": "Quick Filters",
+            "json": json.dumps(QUICK_FILTERS_DEAL),
+        }
+    ).insert(ignore_permissions=True)
+
+
+def _vistas_por_defecto():
+    """Siembra las vistas guardadas publicas de `CRM Deal` en un sitio sin ninguna.
+
+    La guarda es a proposito amplia (cualquier vista publica de `CRM Deal`): si
+    el cliente ya armo las suyas, no se le mete nada. Las vistas no viajan por
+    fixture porque su `name` es un consecutivo y `user` distingue las personales.
+    """
+    if frappe.db.exists("CRM View Settings", {"dt": "CRM Deal", "public": 1}):
+        return
+    for vista in VISTAS_CLIENTE:
+        doc = frappe.get_doc(
+            {
+                "doctype": "CRM View Settings",
+                "label": vista["label"],
+                "dt": "CRM Deal",
+                "type": vista["type"],
+                "route_name": vista["route_name"],
+                "is_default": vista["is_default"],
+                "pinned": vista["pinned"],
+                "public": 1,
+                # '' y no None: la API de vistas filtra `user = ''` para las
+                # publicas. Con NULL la vista queda invisible para todos (el
+                # mismo tropiezo del 2026-09-06 con las vistas de la migracion).
+                "user": "",
+                "filters": json.dumps(vista["filters"]),
+                "order_by": vista["order_by"],
+                "column_field": vista.get("column_field"),
+                "title_field": vista.get("title_field"),
+                "columns": json.dumps(_VISTA_COLUMNAS),
+                "rows": json.dumps(_VISTA_FILAS),
+                "kanban_fields": json.dumps(vista.get("kanban_fields") or []),
+            }
+        )
+        doc.insert(ignore_permissions=True)
 
 
 def _usuario_servicio_agente():

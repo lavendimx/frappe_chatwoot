@@ -106,25 +106,26 @@ la usa, hay que extenderlos igual que el resto (`siteFor`/`sitesToPoll`).
    `bench --site <sitio> migrate`. No hace falta `git pull` por sitio — el código
    es uno solo, compartido por todo el bench.
 
-### Lo que todavía NO viaja (revisar antes de dar un sitio por "al día")
+### UX de la plataforma que no viaja por fixture (cerrado 2026-09-17)
 
-Detectado el 2026-09-17 al actualizar sixgardens; ninguno se arregló todavía:
+Detectado al actualizar sixgardens. Los tres van en `utils/provisionamiento.py`
+(`after_migrate`), no en `fixtures/` — ninguno tiene `name` estable:
 
-- **Quick filters** (`CRM Global Settings`, `type = Quick Filters`): sixgardens
-  quedó con los 4 por defecto (`organization, status, probability, email`) y
-  crm.lavendi.mx con `["status"]`. No puede ser fixture plano: el `name` del
-  registro es aleatorio y la unicidad es `dt + type`, así que importarlo
-  duplicaría. Va como paso de `provisionamiento.py`.
-- **Vistas guardadas** (`CRM View Settings`): sixgardens tiene **0** para
-  `CRM Deal`; crm.lavendi.mx tiene 6 (incluido el kanban "Embudo de ventas", que
-  es la vista por defecto). Sin ellas, Oportunidades abre en lista genérica.
-- **Campos de `Chatwoot Settings`** (12: `evolution_*`, `onboarding_*`,
-  `inbox_formulario`, `recordatorio_citas_activo`, `secuencias_activas`): no
-  están en `DOCTYPES_PROPIOS`, así que no viajan. En sixgardens los jobs del
-  scheduler salen sin error (leen `None` y se saltan), pero el sitio no puede
-  usar recordatorio de citas, bienvenida del formulario ni secuencias hasta
-  definirlos. Las *definiciones* de campo no llevan secretos; los *valores* sí
-  son por sitio.
+- **Quick filters** (`CRM Global Settings`, `type = Quick Filters`): el `name` es
+  aleatorio y la unicidad es `dt + type`, así que un fixture duplicaría.
+  `_quick_filters_deal()` deja `CRM Deal` en `["status"]` **solo si el sitio
+  todavía tiene los 4 por defecto**; si el cliente ya los ajustó, no se pisa.
+- **Vistas guardadas** (`CRM View Settings`): `_vistas_por_defecto()` siembra 3
+  vistas públicas ("Embudo de ventas" kanban y default, "Oportunidades abiertas",
+  "Ganadas") **solo si el sitio no tiene ninguna** vista pública de `CRM Deal`.
+  La de lavendi.mx filtra `ghl_status = open`; la del cliente filtra
+  `status not in [Won, Lost]` para funcionar sin datos de GHL.
+  ⚠ `user` va en `''`, **no NULL** (ver Trampas).
+- **Campos de `Chatwoot Settings`** (12): `Chatwoot Settings` se sumó a
+  `DOCTYPES_PROPIOS`, así que sus definiciones de campo viajan por fixture. Viaja
+  la DEFINICIÓN; los valores (tokens, URLs, qué inbox) son por sitio. Sin esto el
+  sitio no podía usar recordatorio de citas, bienvenida del formulario ni
+  secuencias (los jobs salían sin error pero se saltaban).
 
 ## Trampas aprendidas
 
@@ -153,6 +154,15 @@ Detectado el 2026-09-17 al actualizar sixgardens; ninguno se arregló todavía:
   `sites/<sitio>/public/files/`. El registro `File` es opcional (verificado 2026-09-16).
 - **La marca no se pisa**: `_branding_plataforma()` solo escribe `Website Settings` si el
   `app_name` sigue en `""`/`Frappe`. Un cliente con marca propia la conserva.
+- **Las vistas públicas van con `user = ''`, no NULL**: la API de `CRM View Settings`
+  filtra `user = ''`; una vista con `user` NULL queda invisible para todos (el mismo
+  tropiezo del 2026-09-06 con las vistas de la migración). Verificado en sixgardens
+  2026-09-17: con NULL el kanban no aparecía y Oportunidades abría en lista.
+- **El idioma del sitio**: `System Settings.language` vacío → el SPA cae a inglés.
+  El front propio va en español, pero todo lo que rotula el backend (etiquetas de
+  campo, "Crear oportunidad", filtros) sale en inglés porque la `Translation` solo
+  se aplica si el idioma resuelto es `es`. `_idioma_plataforma()` lo fija si está
+  vacío; el idioma por usuario manda por encima.
 - **Rutas en `/etc/hosts` del host**: `crm.lavendi.mx` y cada sitio de cliente apuntan a
   `127.0.0.1` porque el bench solo escucha ahí. Un sitio nuevo sin esa línea da
   *connection refused* desde el proceso Node (no un 404, que sería el otro síntoma).

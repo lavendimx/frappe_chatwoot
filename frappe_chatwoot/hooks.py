@@ -151,6 +151,12 @@ after_request = [
 
 DOCTYPES_PROPIOS = [
     "Agente IA",
+    # Single del app: sus 12 campos propios (evolution_*, onboarding_*,
+    # inbox_formulario, recordatorio_citas_activo, secuencias_activas, agenda_*,
+    # bienvenida_formulario_activa) no viajaban, asi que un sitio de cliente no
+    # podia usar recordatorio de citas, bienvenida del formulario ni secuencias.
+    # Viaja la DEFINICION del campo; el VALOR (tokens, URLs) es por sitio.
+    "Chatwoot Settings",
     "Chatwoot Pausa",
     "KB Inbox",
     "KB Source",
