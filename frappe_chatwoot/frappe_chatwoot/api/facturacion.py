@@ -233,6 +233,59 @@ def detalle(factura: str) -> dict:
 
 
 @frappe.whitelist()
+def editar_factura(factura: str, due_date: str) -> dict:
+    """Edita el vencimiento de una factura ya emitida.
+
+    Es el único campo seguro de tocar en una `Sales Invoice` con docstatus=1:
+    `due_date` no vive en ningún `GL Entry` (es metadata de aging/cobranza), a
+    diferencia de monto, cliente o concepto — esos sí están amarrados al
+    asiento contable ya sellado, y la vía correcta de ERPNext para corregirlos
+    es cancelar + reemitir, no un edit (Alejandro, 2026-09-17).
+
+    Por eso se escribe con `frappe.db.set_value` (bypassa el candado de
+    submit) en vez de `doc.save()`, que rechazaría el cambio en un documento
+    presentado. `set_status(update=True)` recalcula Vencida/Sin pagar acorde
+    al vencimiento nuevo — si no, `status` quedaría desfasado hasta el
+    scheduled job diario de ERPNext.
+
+    OJO — el vencimiento que decide "Vencida" no es este campo: es el de
+    `Payment Schedule` (child table que ERPNext crea al someter, aunque no
+    haya términos de pago explícitos). Sin recorrerla, `status` se habría
+    quedado en Vencida aunque el vencimiento ya apuntara a futuro (encontrado
+    al validar esta función). Se desplaza cada fila el mismo número de días
+    que el vencimiento principal, para no romper el espaciado si algún día
+    hay más de una.
+    """
+    validate_role()
+    inv = frappe.db.get_value(
+        "Sales Invoice", factura, ["docstatus", "posting_date", "due_date"], as_dict=True
+    )
+    if not inv:
+        frappe.throw("La factura no existe")
+    if inv.docstatus != 1:
+        frappe.throw("La factura no está emitida")
+
+    nuevo = frappe.utils.getdate(due_date)
+    if nuevo < frappe.utils.getdate(inv.posting_date):
+        frappe.throw("El vencimiento no puede ser anterior a la fecha de emisión")
+
+    delta = frappe.utils.date_diff(nuevo, inv.due_date) if inv.due_date else 0
+    frappe.db.set_value("Sales Invoice", factura, "due_date", nuevo)
+    if delta:
+        for fila in frappe.get_all(
+            "Payment Schedule", filters={"parent": factura, "parenttype": "Sales Invoice"},
+            fields=["name", "due_date"],
+        ):
+            frappe.db.set_value(
+                "Payment Schedule", fila.name, "due_date",
+                frappe.utils.add_days(fila.due_date, delta),
+            )
+    frappe.get_doc("Sales Invoice", factura).set_status(update=True)
+    frappe.db.commit()
+    return detalle(factura)
+
+
+@frappe.whitelist()
 def modos_de_pago() -> list[dict]:
     """Los modos vienen en inglés desde los masters de ERPNext ('Wire Transfer',
     'Cash'…). Se traducen para la interfaz pero se manda el valor original: el
@@ -804,6 +857,36 @@ def pausar_recurrente(name: str, pausar: int = 1) -> dict:
     doc = frappe.get_doc("Auto Repeat", name)
     doc.disabled = 1 if frappe.utils.cint(pausar) else 0
     doc.status = "Disabled" if doc.disabled else "Active"
+    doc.save()
+    return {"ok": True, **detalle_recurrente(name)}
+
+
+@frappe.whitelist()
+def editar_recurrente(name: str, frecuencia: str = None, dia=None, fin: str = None) -> dict:
+    """Edita día del mes / frecuencia / fecha fin de una recurrente existente.
+
+    `Auto Repeat` NO es submittable (a diferencia de la factura molde que sí
+    lo es), así que aquí un `doc.save()` normal basta — Frappe recalcula
+    `next_schedule_date` solo en `validate() -> set_dates()`.
+
+    El monto y el cliente NO se editan aquí a propósito: viven en la factura
+    molde (`reference_document`, submitted), y tocarlos ahí desincronizaría
+    el libro contable. La vía ya existente para cambiar el monto es pausar
+    esta y crear una nueva (`crear_recurrente`/`crear_desde_factura`) — el
+    mismo criterio que ya aplica `_duplicado_recurrente`.
+    """
+    validate_role()
+    doc = frappe.get_doc("Auto Repeat", name)
+
+    if frecuencia:
+        if frecuencia not in FRECUENCIAS:
+            frappe.throw("Frecuencia inválida")
+        doc.frequency = frecuencia
+    if dia not in (None, ""):
+        doc.repeat_on_day = frappe.utils.cint(dia)
+    if fin is not None:
+        doc.end_date = fin or None
+
     doc.save()
     return {"ok": True, **detalle_recurrente(name)}
 
