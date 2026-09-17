@@ -12,9 +12,9 @@ que vengan). Antes de esto la propagación era a mano, sitio por sitio, y la ram
 | App `crm` (SPA + backend) | `lavendimx/crm`, rama **`lavendi-sofia`** (privado) | `bench get-app crm <url> --branch lavendi-sofia` |
 | App `frappe_chatwoot` (API, utils, agentes) | `lavendimx/frappe_chatwoot`, rama `master` | `bench get-app frappe_chatwoot <url>` |
 | 15 doctypes propios | `frappe_chatwoot/frappe_chatwoot/doctype/*` (código) | `bench migrate` los crea |
-| Campos, property setters, traducciones, permisos, Web Forms, embudo/orígenes/razones | `frappe_chatwoot/frappe_chatwoot/fixtures/*.json` | `bench migrate` los importa |
+| Campos, property setters, traducciones, permisos, Web Forms, embudo/orígenes/razones, layouts del CRM | `frappe_chatwoot/frappe_chatwoot/fixtures/*.json` | `bench migrate` los importa |
 | Lo que depende de `erpnext` (`Customer`, `Sales Invoice`, `Payment Entry`) | `frappe_chatwoot/frappe_chatwoot/fixtures/erpnext/*.json` | `after_migrate`, **solo si erpnext está instalado** |
-| Ajustes que los fixtures no pueden hacer (borrar etapas nativas) | `frappe_chatwoot/utils/provisionamiento.py` (`after_migrate`) | `bench migrate` |
+| Ajustes que los fixtures no pueden hacer (borrar etapas nativas, idioma por defecto) | `frappe_chatwoot/utils/provisionamiento.py` (`after_migrate`) | `bench migrate` |
 | Marca de la plataforma (nombre, logo, splash, favicon) | `frappe_chatwoot/public/images/*.png` + `provisionamiento.py` | `bench migrate` |
 | Usuario de servicio del agente (`agente-ia@lavendi.mx`) | `provisionamiento.py` (usuario; la API key es manual) | `bench migrate` |
 | Agente IA (motor Node) | repo `agente-ia` (rama `master`) | `pm2 restart agente-ia-chatwoot` |
@@ -89,13 +89,42 @@ la usa, hay que extenderlos igual que el resto (`siteFor`/`sitesToPoll`).
 2. **Doctype nuevo o cambiado**: exportarlo a código
    (`bench --site crm.lavendi.mx execute frappe_chatwoot._exportar_doctypes.ejecutar`)
    y commit.
-3. **Campo / property setter / traducción / permiso / Web Form**: agregarlo a la DB de
-   crm.lavendi.mx, luego `bench --site crm.lavendi.mx export-fixtures --app frappe_chatwoot`
-   y commit. Los filtros viven en `hooks.py` (`fixtures = [...]`).
+3. **Campo / property setter / traducción / permiso / Web Form / layout del CRM**:
+   agregarlo a la DB de crm.lavendi.mx, luego
+   `bench --site crm.lavendi.mx export-fixtures --app frappe_chatwoot` y commit.
+   Los filtros viven en `hooks.py` (`fixtures = [...]`). Los **layouts** (`CRM
+   Fields Layout`) van como fixture sin filtro: el layout es UN campo JSON por
+   registro, así que el fixture lo reemplaza completo (no aplica la trampa de
+   las child tables). Un cambio de layout **no** requiere `bench build` — el SPA
+   lo pide por API.
    Si el doctype destino es de `erpnext` (o de cualquier app opcional), va a
    `fixtures/erpnext/` — no a `fixtures/`.
-4. **Borrar algo** (etapa, campo): los fixtures no borran — va en
-   `utils/provisionamiento.py` (como `_borrar_etapas_nativas`) o en un patch de la app.
+4. **Borrar algo** (etapa, campo) o **fijar un default del sitio** (idioma):
+   los fixtures no borran ni tocan `Singles` — va en `utils/provisionamiento.py`
+   (como `_borrar_etapas_nativas`, `_idioma_plataforma`) o en un patch de la app.
+5. **Aplicar a un sitio existente**: `bench --site <sitio> backup` y luego
+   `bench --site <sitio> migrate`. No hace falta `git pull` por sitio — el código
+   es uno solo, compartido por todo el bench.
+
+### Lo que todavía NO viaja (revisar antes de dar un sitio por "al día")
+
+Detectado el 2026-09-17 al actualizar sixgardens; ninguno se arregló todavía:
+
+- **Quick filters** (`CRM Global Settings`, `type = Quick Filters`): sixgardens
+  quedó con los 4 por defecto (`organization, status, probability, email`) y
+  crm.lavendi.mx con `["status"]`. No puede ser fixture plano: el `name` del
+  registro es aleatorio y la unicidad es `dt + type`, así que importarlo
+  duplicaría. Va como paso de `provisionamiento.py`.
+- **Vistas guardadas** (`CRM View Settings`): sixgardens tiene **0** para
+  `CRM Deal`; crm.lavendi.mx tiene 6 (incluido el kanban "Embudo de ventas", que
+  es la vista por defecto). Sin ellas, Oportunidades abre en lista genérica.
+- **Campos de `Chatwoot Settings`** (12: `evolution_*`, `onboarding_*`,
+  `inbox_formulario`, `recordatorio_citas_activo`, `secuencias_activas`): no
+  están en `DOCTYPES_PROPIOS`, así que no viajan. En sixgardens los jobs del
+  scheduler salen sin error (leen `None` y se saltan), pero el sitio no puede
+  usar recordatorio de citas, bienvenida del formulario ni secuencias hasta
+  definirlos. Las *definiciones* de campo no llevan secretos; los *valores* sí
+  son por sitio.
 
 ## Trampas aprendidas
 
