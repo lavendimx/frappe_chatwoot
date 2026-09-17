@@ -449,11 +449,13 @@ def inscribir(secuencia: str, apply: int = 0, limite: int = 0) -> dict:
                 "estado": "Activa",
                 "paso_actual": 0,
                 "proximo_en": cuando,
-                # Sembrado al instante de inscripción, no vacío: así una
-                # respuesta que llega ANTES del primer envío automático (p.
-                # ej. durante la primera espera de 2 días) también saca al
-                # contacto de la secuencia. Ver punto 11 del docstring.
-                "ultimo_envio_at": cuando,
+                # Sembrado al instante de inscripción (no a `cuando`, que es
+                # el próximo hueco de ventana y puede caer horas/días después):
+                # así una respuesta que llega ANTES del primer envío
+                # automático (p. ej. durante la primera espera de 2 días)
+                # también saca al contacto. Ver punto 11 del docstring —
+                # el bug (usaba `cuando`) dejaba ese hueco sin cubrir.
+                "ultimo_envio_at": _ahora(),
             }).insert(ignore_permissions=True)
             _reflejar_en_deal(d.name)
         frappe.db.commit()
@@ -1211,7 +1213,7 @@ def inscribir_deal(secuencia: str, deal: str) -> dict:
         # inscripción previa. Arranca de cero y limpia el motivo anterior.
         _set_ins(existente.name, {
             "estado": "Activa", "paso_actual": 0, "proximo_en": cuando,
-            "ultimo_envio_at": cuando, "conversation_id": conv, "motivo": "",
+            "ultimo_envio_at": _ahora(), "conversation_id": conv, "motivo": "",
         })
         frappe.db.commit()
         return {"ok": True, "name": existente.name, "reactivada": True,
@@ -1227,9 +1229,11 @@ def inscribir_deal(secuencia: str, deal: str) -> dict:
         "estado": "Activa",
         "paso_actual": 0,
         "proximo_en": cuando,
-        # Sembrado, no vacío: una respuesta que llegue antes del primer envío
-        # automático también saca al contacto (punto 11 del docstring).
-        "ultimo_envio_at": cuando,
+        # Sembrado al instante de inscripción, NO a `cuando` (próximo hueco de
+        # ventana, puede ser horas/días después): una respuesta que llegue
+        # antes del primer envío automático también saca al contacto (punto
+        # 11 del docstring) — con `cuando` ese hueco quedaba sin cubrir.
+        "ultimo_envio_at": _ahora(),
     }).insert(ignore_permissions=True)
     _reflejar_en_deal(deal)
     frappe.db.commit()
@@ -1333,7 +1337,14 @@ def forzar_paso(inscripcion: str) -> dict:
         return {"ok": False, "error": str(exc)[:300],
                 "mensaje": f"El paso {i + 1} falló: {exc}"}
 
-    espera = frappe.utils.cint(paso.get("espera_minutos"))
+    # Forzar un paso "Esperar" debe saltarse también SU PROPIA espera: es
+    # el paso que representa "no hacer nada N minutos", y la persona que
+    # fuerza está pidiendo justamente lo contrario. Sin esto, forzar el
+    # primer paso de una secuencia (típicamente "Esperar 2 días") reaplicaba
+    # la espera completa sobre el paso siguiente — el forzado no adelantaba
+    # nada, solo reiniciaba el mismo conteo (caso real: Rocío Rivera, 17-sep).
+    es_espera = paso.get("tipo") == "Esperar"
+    espera = 0 if es_espera else frappe.utils.cint(paso.get("espera_minutos"))
     proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(_ahora(), minutes=espera or 1))
     cambios = {"paso_actual": i + 1, "proximo_en": proximo}
     if paso.get("tipo") in ("WhatsApp", "Email"):
@@ -1346,6 +1357,13 @@ def forzar_paso(inscripcion: str) -> dict:
         p = pasos[i + 1]
         p = p if isinstance(p, dict) else p.as_dict()
         siguiente = p.get("nombre_ghl") or p.get("tipo") or "Completada"
+
+    if es_espera:
+        # `_ejecutar_paso` no manda nada para "Esperar" y regresa la nota
+        # muda "espera" — sin esto el toast de éxito no explica que no se
+        # envió ningún mensaje.
+        nota = f"Espera saltada, sin envío. Listo para: {siguiente}."
+
     return {
         "ok": True, "nota": nota, "paso": i + 1, "total_pasos": len(pasos),
         "siguiente_paso": siguiente,
