@@ -204,6 +204,13 @@ fixtures += [
     {"dt": "CRM Deal Status"},
     {"dt": "CRM Lead Source"},
     {"dt": "CRM Lost Reason"},
+    # Los layouts del CRM (que campos se ven en el alta, el tab Datos y el panel
+    # lateral). El equipo los curo a mano en crm.lavendi.mx — cierre 17: ocultar
+    # los campos muertos; cierre 19: "Valor de la oportunidad" en los 3 layouts
+    # del deal. NO viajaban: un sitio nuevo se quedaba con los layouts crudos de
+    # frappe/crm. El layout es UN campo JSON por registro, asi que el fixture lo
+    # reemplaza completo — no aplica la trampa de las child tables.
+    {"dt": "CRM Fields Layout"},
 ]
 
 # ---------------------------------------------------------------------------

@@ -7694,5 +7694,18 @@
   "name": "tb3hf59nga",
   "source_text": "Search by keyword",
   "translated_text": "Buscar por palabra clave"
+ },
+ {
+  "context": null,
+  "contributed": 0,
+  "contribution_docname": null,
+  "contribution_status": "",
+  "docstatus": 0,
+  "doctype": "Translation",
+  "language": "es",
+  "modified": "2026-09-16 16:48:57.649287",
+  "name": "840hfcqu57",
+  "source_text": "Add Deal Value...",
+  "translated_text": "Agregar valor de la oportunidad..."
  }
 ]
