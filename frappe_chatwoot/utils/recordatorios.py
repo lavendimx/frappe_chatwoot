@@ -8,7 +8,7 @@ Sofía agendaba pero no recordaba: este job cierra ese hueco.
 Diferencias deliberadas con GHL, y por qué:
 
   - GHL esperaba dentro del propio workflow (una instancia viva por cita).
-    Aquí es un job que barre cada 15 minutos la ventana [+45 min, +75 min].
+    Aquí es un job que barre cada 15 minutos la ventana [+45 min, +63 min].
     No hay estado que sobreviva a un reinicio, que es justo lo que ya nos
     mordió con `lastProcessed` del agente el 2026-09-06.
   - GHL usaba `appointmentCondition: skip` para no avisar de citas que ya
@@ -23,12 +23,16 @@ import frappe
 
 from ..frappe_chatwoot.api import chatwoot as api_cw
 
-# Ventana del barrido. Más ancha que el intervalo del cron a propósito: si una
-# corrida se salta (reinicio, cola atorada), la siguiente todavía alcanza la
-# cita. La marca `recordatorio_enviado_at` evita el doble aviso que esto haría
-# posible.
+# Ventana del barrido, asimétrica a propósito: HOLGURA_ATRAS es más ancha que
+# el intervalo del cron para que, si una corrida se salta (reinicio, cola
+# atorada), la siguiente todavía alcance la cita. MARGEN_ADELANTO es solo el
+# jitter del scheduler — si fuera simétrico, el primer tick que ve una cita
+# alineada a la rejilla de 15 min (12:00 -> tick de 10:45) la marca a 75 min
+# y el tick de los 60 min reales ya nunca la encuentra. La marca
+# `recordatorio_enviado_at` evita el doble aviso que la holgura haría posible.
 MINUTOS_ANTES = 60
-HOLGURA = 15
+HOLGURA_ATRAS = 15
+MARGEN_ADELANTO = 3
 
 
 def _activo():
@@ -81,8 +85,8 @@ def enviar_recordatorios():
         return {"activo": False}
 
     ahora = frappe.utils.now_datetime()
-    desde = frappe.utils.add_to_date(ahora, minutes=MINUTOS_ANTES - HOLGURA)
-    hasta = frappe.utils.add_to_date(ahora, minutes=MINUTOS_ANTES + HOLGURA)
+    desde = frappe.utils.add_to_date(ahora, minutes=MINUTOS_ANTES - HOLGURA_ATRAS)
+    hasta = frappe.utils.add_to_date(ahora, minutes=MINUTOS_ANTES + MARGEN_ADELANTO)
 
     citas = frappe.get_all(
         "Reunion Agendada",

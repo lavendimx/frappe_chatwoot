@@ -137,6 +137,20 @@ def _resolver_ficha(cita, crear=True):
                                    order_by="modified desc", limit=1)
             if fila:
                 return (doctype, fila[0].name)
+
+    # Segunda vuelta por correo, incluso con `crm_contacto` poblado: los
+    # contactos se duplican (`Alexis Solano` / `Alexis Solano-1`, creados con un
+    # día de diferencia por el mismo correo) y la cita puede apuntar al gemelo
+    # sin ficha mientras el lead real cuelga del otro. Buscar solo por contacto
+    # creaba un lead duplicado — pasó el 2026-09-18 con esa misma persona.
+    correo = (cita.get("email_participante") or "").strip().lower()
+    if correo:
+        for doctype in ("CRM Deal", "CRM Lead"):
+            fila = frappe.get_all(doctype, filters={"email": correo}, fields=["name"],
+                                   order_by="modified desc", limit=1)
+            if fila:
+                return (doctype, fila[0].name)
+
     if not crear:
         return (None, None)
     try:

@@ -409,7 +409,7 @@ def inscribir(secuencia: str, apply: int = 0, limite: int = 0) -> dict:
     NO inscribe:
       - deals sin conversación de Chatwoot (no hay a dónde escribir),
       - deals ya inscritos en esta secuencia (`permitir_reingreso` aparte),
-      - deals que no están `open`.
+      - deals con `status` Won o Lost.
     """
     sec = frappe.get_doc("Secuencia", secuencia).as_dict()
     if not sec.get("producto"):
@@ -417,7 +417,10 @@ def inscribir(secuencia: str, apply: int = 0, limite: int = 0) -> dict:
 
     deals = frappe.get_all(
         "CRM Deal",
-        filters={"ghl_status": "open", "ghl_producto": sec["producto"]},
+        filters={
+            "status": ["not in", ["Won", "Lost"]],
+            "ghl_producto": sec["producto"],
+        },
         fields=["name", "contact", "deal_value", "organization"],
         order_by="modified desc",
         limit_page_length=frappe.utils.cint(limite) or 0,
@@ -505,6 +508,12 @@ def _contexto(ins: dict) -> dict:
         "contact.email": contacto.get("email_id") or "",
     }
 
+
+# Copia al equipo en cada correo de seguimiento (Alejandro, 18-sep). La regla de
+# lavendi.mx pide CC en todo saliente; aquí además sirve de acuse: si el correo no
+# llega a estos buzones, no salió. Ponerlo en `None` lo apaga sin tocar más código.
+CC_EQUIPO = ("alejandro.moreno@lavendi.mx, valente.flores@lavendi.mx, "
+             "contacto@lavendi.mx")
 
 _MEDIA_MAP_CACHE_KEY = "frappe_chatwoot:secuencias:media_map"
 
@@ -634,8 +643,17 @@ def _correo_disponible() -> bool:
                 and s.get_password("agenda_token", raise_exception=False))
 
 
-def _enviar_correo(para: str, asunto: str, html: str, remitente: str = "contacto@lavendi.mx") -> None:
-    """Manda el correo por el host (Gmail API con la service account). Lanza si falla."""
+def _enviar_correo(para: str, asunto: str, html: str, remitente: str = "contacto@lavendi.mx",
+                   cc: str | None = None, adjuntos: list | None = None) -> None:
+    """Manda el correo por el host (Gmail API con la service account). Lanza si falla.
+
+    `cc` existe porque la regla de lavendi.mx pide copia al equipo en todo saliente
+    (Alejandro, 18-sep). El endpoint del host ya aceptaba `cc`; solo faltaba pasarlo.
+
+    `adjuntos` es una lista de `{"nombre", "mime", "datosB64"}` (18-sep). Sin ella el
+    host arma el MIME de una sola parte de siempre — el camino sin adjunto no cambia.
+    El timeout sube a 120 s cuando hay adjunto: 250 KB de base64 por la red Docker más
+    la subida a Gmail no caben en los 30 s del caso normal."""
     import requests
 
     s = frappe.get_single("Chatwoot Settings")
@@ -643,12 +661,64 @@ def _enviar_correo(para: str, asunto: str, html: str, remitente: str = "contacto
     token = s.get_password("agenda_token", raise_exception=False) or ""
     resp = requests.post(
         f"{base}/correo/enviar",
-        json={"para": para, "asunto": asunto, "html": html, "remitente": remitente},
+        json={"para": para, "asunto": asunto, "html": html, "remitente": remitente,
+              **({"cc": cc} if cc else {}),
+              **({"adjuntos": adjuntos} if adjuntos else {})},
         headers={"x-sofia-token": token, "Content-Type": "application/json"},
-        timeout=30,
+        timeout=120 if adjuntos else 30,
     )
     if resp.status_code != 200:
         raise Exception(f"host /correo/enviar -> {resp.status_code}: {resp.text[:200]}")
+
+
+def _dado_de_baja(destino: str, secuencia: str) -> bool:
+    """¿Ya se dio de baja de esta secuencia (o de todo, `global_unsubscribe`)?
+
+    Ligado a `reference_doctype="Secuencia", reference_name=<secuencia>`: una
+    baja en cualquier email de "4. Seguimientos — PVP" cierra el paso Email
+    para el resto de esa MISMA secuencia, sin tocar otras. El WhatsApp de la
+    misma inscripción sigue — son canales con consentimiento distinto (plan
+    `campanas-newsletter-secuencias.md`, Fase C, paso 12)."""
+    return bool(
+        frappe.db.exists("Email Unsubscribe", {"email": destino, "global_unsubscribe": 1})
+        or frappe.db.exists("Email Unsubscribe", {
+            "email": destino, "reference_doctype": "Secuencia", "reference_name": secuencia,
+        })
+    )
+
+
+def _enviar_correo_frappe(para: str, asunto: str, html: str, secuencia: str,
+                          remitente: str = "contacto@lavendi.mx",
+                          adjuntos: list | None = None) -> None:
+    """Riel unificado: `frappe.sendmail` (mismo motor que Campañas), con
+    tracking de apertura (`track_email_status` del `Email Account`, activo
+    desde el 2026-09-16) y link de baja ligado a la secuencia. Lanza si falla
+    — el llamador decide el fallback (Fase C, paso 11).
+
+    Detrás de `Chatwoot Settings.correo_secuencias_via_frappe` (nace apagado):
+    cambiar el riel de una secuencia con inscripciones vivas sin haber
+    probado el HTML real primero dejaría a esos contactos sin correo si algo
+    se rompe en el camino.
+
+    `adjuntos` usa el mismo formato que el riel del host (`nombre`/`datosB64`) y se
+    traduce al que espera `frappe.sendmail` (`fname`/`fcontent`). Sin esto, prender
+    el flag algún día habría mandado el correo del checklist **sin el PDF y sin
+    avisar** — el modo de falla silenciosa que ya costó Aerotec y Agri Star."""
+    import base64
+
+    anexos = [{"fname": a["nombre"], "fcontent": base64.b64decode(a["datosB64"])}
+              for a in (adjuntos or [])]
+    frappe.sendmail(
+        recipients=[para],
+        sender=remitente,
+        subject=asunto,
+        message=html,
+        reference_doctype="Secuencia",
+        reference_name=secuencia,
+        add_unsubscribe_link=1,
+        unsubscribe_method="/unsubscribe",
+        **({"attachments": anexos} if anexos else {}),
+    )
 
 
 # El widget de agenda de GHL (dominio white-label de la subcuenta). Ya está cortado: el
@@ -764,18 +834,58 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
             # 79% de los contactos migrados no tiene correo (medido 06-sep).
             # Saltar es correcto; abortar dejaría la secuencia atorada para siempre.
             return "email omitido (contacto sin correo)"
+
+        asunto = _resolver(paso.get("asunto"), ctx) or "lavendi.mx"
+        html = _html_seguro(_resolver(paso.get("html") or paso.get("mensaje"), ctx))
+
+        # El paso Email puede llevar adjunto real, igual que el de WhatsApp (18-sep,
+        # a petición de Alejandro para el checklist del 2do seguimiento PVP): el PDF
+        # va como archivo Y el enlace sigue en el cuerpo. Se reusa la misma pareja
+        # `_adjunto_seguro` + `_leer_adjunto` del WhatsApp — nunca se manda un link
+        # muerto de GHL y el archivo se lee del disco del sitio, sin dar vuelta por
+        # la red. Si no se puede leer NO se aborta: el correo sale igual sin adjunto
+        # porque el enlace ya va en el HTML. Omitir el correo entero por un archivo
+        # ilegible sería peor que mandarlo con un adjunto de menos.
+        adjuntos, nota_adjunto = None, ""
+        if paso.get("adjunto_url"):
+            rehospedado = _adjunto_seguro(paso["adjunto_url"])
+            leido = _leer_adjunto(rehospedado) if rehospedado else None
+            if leido:
+                import base64
+                nombre, datos, mime = leido
+                adjuntos = [{"nombre": nombre, "mime": mime,
+                             "datosB64": base64.b64encode(datos).decode()}]
+            else:
+                nota_adjunto = " (adjunto no disponible, se envió solo con el enlace)"
+
+        # Fase C del plan campanas-newsletter-secuencias.md: riel unificado con
+        # Campañas (frappe.sendmail, tracking, respeta bajas), detrás de flag y
+        # con fallback automático al riel viejo (_enviar_correo) si falla — un
+        # cambio de riel no debe dejar sin correo a inscripciones vivas.
+        if frappe.db.get_single_value("Chatwoot Settings", "correo_secuencias_via_frappe"):
+            if _dado_de_baja(destino, ins["secuencia"]):
+                return "email omitido (dado de baja de esta secuencia)"
+            try:
+                _enviar_correo_frappe(destino, asunto, html, ins["secuencia"],
+                                      adjuntos=adjuntos)
+                return f"email enviado a {destino} (frappe.sendmail){nota_adjunto}"
+            except Exception as exc:
+                frappe.log_error(
+                    f"secuencia {ins['name']}: email (frappe.sendmail) a {destino}: {exc}",
+                    "Secuencias",
+                )
+                # cae al riel viejo, no se queda sin intentar
+
         if not _correo_disponible():
             # Ver `_correo_disponible`: sin canal, reportar éxito sería la misma
             # falla silenciosa que ya costó Aerotec y Agri Star.
             return "email omitido (sin canal de correo saliente configurado)"
-        asunto = _resolver(paso.get("asunto"), ctx) or "lavendi.mx"
-        html = _html_seguro(_resolver(paso.get("html") or paso.get("mensaje"), ctx))
         try:
-            _enviar_correo(destino, asunto, html)
+            _enviar_correo(destino, asunto, html, cc=CC_EQUIPO, adjuntos=adjuntos)
         except Exception as exc:
             frappe.log_error(f"secuencia {ins['name']}: email a {destino}: {exc}", "Secuencias")
             return f"email omitido (error al enviar: {exc})"
-        return f"email enviado a {destino}"
+        return f"email enviado a {destino}{nota_adjunto}"
 
     if tipo == "Nota interna":
         cw.create_message(int(ins["conversation_id"]),
@@ -870,6 +980,25 @@ def _debe_salir(ins: dict) -> str | None:
             return f"la oportunidad pasó a {valor} ({campo})"
 
     sec = frappe.db.get_value("Secuencia", ins["secuencia"], "parar_si_responde")
+
+    # Multi-contacto sobre una misma oportunidad (18-sep, caso Luz de luna:
+    # Rocío Rivera por WhatsApp + Luis Ayala solo por correo). El consentimiento
+    # es de la CUENTA, no del contacto: si una hermana ya salió porque el
+    # prospecto respondió, seguirle escribiendo al socio es exactamente el ruido
+    # que `parar_si_responde` existe para evitar. Y sin este puente el contacto
+    # de solo-correo NUNCA saldría por respuesta — no tiene `conversation_id`,
+    # así que la rama de abajo no se ejecuta para él.
+    if sec:
+        hermana = frappe.db.get_value(
+            "Secuencia Inscripcion",
+            {"deal": ins["deal"], "secuencia": ins["secuencia"],
+             "estado": "Salió por respuesta", "name": ["!=", ins["name"]]},
+            ["name", "contacto"], as_dict=True,
+        )
+        if hermana:
+            return (f"otro contacto de la oportunidad respondió "
+                    f"({hermana.contacto or hermana.name})")
+
     if sec and ins.get("ultimo_envio_at") and ins.get("conversation_id"):
         try:
             datos = cw.list_messages(int(ins["conversation_id"]))
@@ -1249,6 +1378,62 @@ def inscribir_deal(secuencia: str, deal: str) -> dict:
         "ok": True, "name": doc.name, "sin_conversacion": not bool(conv),
         "proximo_en": str(cuando), "advertencia": advertencia,
     }
+
+
+@frappe.whitelist()
+def inscribir_desde_lista(email_group: str, secuencia: str) -> dict:
+    """Puente Campaña → Secuencia (plan campanas-newsletter-secuencias.md,
+    Fase C, paso 13): inscribe a quien ya tenga una oportunidad (`CRM Deal`),
+    reporta al resto y **nunca crea `CRM Lead` para completar el hueco** — un
+    suscriptor de una lista de correo no es lo mismo que un lead calificado;
+    inventar el pipeline solo por estar en una campaña ensuciaría el embudo
+    real con oportunidades que nadie va a trabajar.
+
+    Match: `Email Group Member.email` -> `Contact Email` -> `CRM Contacts`
+    (child table de `CRM Deal`). Si el contacto tiene más de un deal, se
+    inscribe en el más reciente (`modified` desc) — el mismo criterio que ya
+    usa `buscar_deals`.
+    """
+    _exigir_edicion()
+    if not frappe.db.exists("Email Group", email_group):
+        frappe.throw("Esa lista no existe")
+    if not frappe.db.exists("Secuencia", secuencia):
+        frappe.throw("Esa secuencia no existe")
+
+    miembros = frappe.get_all(
+        "Email Group Member",
+        filters={"email_group": email_group, "unsubscribed": 0},
+        fields=["email"],
+        pluck="email",
+    )
+
+    r = {"inscritos": [], "ya_inscritos": [], "sin_deal": [], "errores": []}
+    for email in miembros:
+        contacto = frappe.db.get_value("Contact", {"email_id": email}, "name")
+        if not contacto:
+            parent = frappe.db.get_value("Contact Email", {"email_id": email}, "parent")
+            contacto = parent
+        deal = None
+        if contacto:
+            deal = frappe.db.get_value(
+                "CRM Contacts", {"contact": contacto}, "parent",
+                order_by="modified desc",
+            )
+        if not deal:
+            r["sin_deal"].append(email)
+            continue
+        try:
+            resultado = inscribir_deal(secuencia, deal)
+            if resultado.get("reactivada") is False or "reactivada" not in resultado:
+                r["inscritos"].append({"email": email, "deal": deal})
+            else:
+                r["inscritos"].append({"email": email, "deal": deal, "reactivada": True})
+        except frappe.ValidationError as exc:
+            if "ya está inscrita" in str(exc):
+                r["ya_inscritos"].append({"email": email, "deal": deal})
+            else:
+                r["errores"].append({"email": email, "deal": deal, "error": str(exc)})
+    return r
 
 
 @frappe.whitelist()
