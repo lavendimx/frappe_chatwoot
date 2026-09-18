@@ -29,6 +29,7 @@ import urllib.request
 
 import frappe
 
+from frappe_chatwoot.utils import autoria
 from frappe_chatwoot.utils import chatwoot_client as cw
 
 from .chatwoot import _pause_conversation, validate_role
@@ -340,9 +341,11 @@ def _enviar(conversation_id: int, message: str | None, adjuntos: list | None) ->
 
     Mismo camino que `api/chatwoot.send_message`: con la URL pegada al `content`
     el cliente ve un enlace, no la imagen (ver `chatwoot_client.leer_adjunto`).
-    Se marca `humano` para que el agente lea el mensaje como palabra del equipo.
+    Se marca `humano` (con el usuario de la sesión) para que el agente lea el
+    mensaje como palabra del equipo y la burbuja muestre quién lo escribió.
     Sin texto ni adjuntos no hace nada: es el caso de `asegurar_conversacion`.
     """
+    marca = autoria.marca_humana()
     adjuntos = adjuntos or []
     if adjuntos:
         archivos = []
@@ -353,12 +356,12 @@ def _enviar(conversation_id: int, message: str | None, adjuntos: list | None) ->
         if archivos:
             cw.create_message_with_attachments(
                 conversation_id, message or "", archivos=archivos,
-                content_attributes={"humano": True})
+                content_attributes=marca)
             return
         if not message:
             frappe.throw("No se pudieron leer los adjuntos")
     if message:
-        cw.create_message(conversation_id, message, content_attributes={"humano": True})
+        cw.create_message(conversation_id, message, content_attributes=marca)
 
 
 def abrir_conversacion(inbox_id: int, phone: str, message: str = None,

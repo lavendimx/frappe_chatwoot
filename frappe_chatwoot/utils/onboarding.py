@@ -191,14 +191,21 @@ def _whatsapp_bienvenida(doc, productos):
         return "apagado (el workflow 6 de GHL sigue publicado)"
 
     from ..frappe_chatwoot.api import chatwoot as api_cw
+    from . import autoria
     from . import onboarding_textos as textos
 
     key = next((p for p in productos if p in textos.PRODUCTOS), None)
     if not key:
         return "sin material para ese producto; lo atiende una persona"
     try:
-        api_cw.cw.create_message(int(conv), textos.PRODUCTOS[key])
-        api_cw.cw.create_message(int(conv), textos.SEGUNDO)
+        api_cw.cw.create_message(
+            int(conv), textos.PRODUCTOS[key],
+            content_attributes=autoria.marca_automatica(
+                "onboarding", f"Bienvenida de onboarding — {key}"))
+        api_cw.cw.create_message(
+            int(conv), textos.SEGUNDO,
+            content_attributes=autoria.marca_automatica(
+                "onboarding", "Onboarding — segundo mensaje"))
         api_cw._pause_conversation(int(conv), getattr(doc, "chatwoot_inbox_id", None))
         return True
     except Exception as exc:

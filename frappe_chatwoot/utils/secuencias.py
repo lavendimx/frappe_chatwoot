@@ -134,6 +134,7 @@ import time
 
 import frappe
 
+from . import autoria
 from . import chatwoot_client as cw
 from .busqueda import condiciones_sql
 
@@ -787,6 +788,16 @@ def _avisar_respondio(ins: dict) -> None:
         frappe.log_error(f"secuencia {ins.get('name')}: aviso de respuesta: {exc}", "Secuencias")
 
 
+def _detalle_paso(ins: dict, paso: dict, sec: dict) -> str:
+    """Texto para el tooltip de la burbuja: qué secuencia y qué paso la mandó.
+    `paso_actual` es base 0 sobre la lista de pasos, así que el humano ve +1."""
+    titulo = sec.get("titulo") or sec.get("name") or "Secuencia"
+    numero = frappe.utils.cint(ins.get("paso_actual")) + 1
+    etiqueta = (paso.get("nombre_ghl") or "").strip()
+    detalle = f"{titulo} · paso {numero}"
+    return f"{detalle} ({etiqueta})" if etiqueta else detalle
+
+
 def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
     """Corre un paso. Devuelve una nota corta para la traza."""
     tipo = paso.get("tipo")
@@ -820,12 +831,17 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
         conv = _asegurar_conversacion(ins, sec)
         if not conv:
             return "whatsapp omitido (sin teléfono o sin inbox para abrir conversación)"
+        # Autoría: la burbuja del hilo debe decir que esto lo mandó la secuencia y
+        # no una persona. Sin la marca sale indistinguible de un mensaje del
+        # equipo (ver utils/autoria.py).
+        marca = autoria.marca_automatica("secuencia", _detalle_paso(ins, paso, sec))
         if adjunto:
             nombre, datos, mime = adjunto
             cw.create_message_with_attachment(
-                int(conv), cuerpo, filename=nombre, data=datos, content_type=mime)
+                int(conv), cuerpo, filename=nombre, data=datos, content_type=mime,
+                content_attributes=marca)
         else:
-            cw.create_message(int(conv), cuerpo)
+            cw.create_message(int(conv), cuerpo, content_attributes=marca)
         return f"whatsapp enviado{nota_adjunto}"
 
     if tipo == "Email":

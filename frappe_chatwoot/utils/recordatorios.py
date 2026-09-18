@@ -21,6 +21,7 @@ Diferencias deliberadas con GHL, y por qué:
 
 import frappe
 
+from . import autoria
 from ..frappe_chatwoot.api import chatwoot as api_cw
 
 # Ventana del barrido, asimétrica a propósito: HOLGURA_ATRAS es más ancha que
@@ -110,7 +111,10 @@ def enviar_recordatorios():
             saltados.append((cita.name, "sin conversación de Chatwoot"))
             continue
         try:
-            api_cw.cw.create_message(int(conv), _mensaje(cita))
+            api_cw.cw.create_message(
+                int(conv), _mensaje(cita),
+                content_attributes=autoria.marca_automatica(
+                    "recordatorio", "Recordatorio de videollamada"))
             frappe.db.set_value("Reunion Agendada", cita.name, "recordatorio_enviado_at",
                                 ahora, update_modified=False)
             enviados.append(cita.name)

@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 import frappe
 from frappe.utils import now_datetime
 
+from . import autoria
 from . import chatwoot_client as cw
 
 MAX_ADJUNTOS = 5
@@ -220,7 +221,9 @@ def _enviar(doc):
             frappe.log_error(f"programados: adjunto ilegible {a.archivo}",
                              f"Mensaje Programado {doc.name}")
 
-    marca = {"humano": True, "programado": True}
+    # La autoría es de quien lo programó, no del scheduler que lo despacha: a esta
+    # altura `frappe.session.user` es Administrator (lo corre el cron).
+    marca = autoria.marca_humana(programado=True, usuario=doc.programado_por)
     if archivos:
         cw.create_message_with_attachments(int(doc.conversation_id), texto,
                                            archivos=archivos, content_attributes=marca)

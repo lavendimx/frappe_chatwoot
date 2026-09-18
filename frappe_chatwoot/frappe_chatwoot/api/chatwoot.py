@@ -23,6 +23,7 @@ import json
 
 import frappe
 
+from frappe_chatwoot.utils import autoria
 from frappe_chatwoot.utils import chatwoot_client as cw
 
 ALLOWED_ROLES = ["System Manager", "Sales Manager", "Sales User"]
@@ -258,7 +259,10 @@ def send_message(conversation_id: int, content: str, inbox_id: int = None,
         frappe.throw("Message content cannot be empty")
 
     conversation_id = frappe.utils.cint(conversation_id)
-    marca = {"humano": True}
+    # Quién manda, no solo "un humano": la burbuja del hilo muestra las iniciales
+    # del usuario de la sesión. Ver utils/autoria.py — `sender` de Chatwoot no
+    # sirve para esto (todo saliente viaja con el dueño del token de la API).
+    marca = autoria.marca_humana()
 
     if adjuntos:
         archivos = []

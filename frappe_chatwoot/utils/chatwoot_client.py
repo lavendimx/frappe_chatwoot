@@ -715,7 +715,8 @@ def leer_adjunto(url: str):
 
 def create_message_with_attachment(conversation_id: int, content: str, *, filename: str,
                                    data: bytes, content_type: str | None = None,
-                                   private: bool = False) -> dict:
+                                   private: bool = False,
+                                   content_attributes: dict | None = None) -> dict:
     """POST .../messages como **multipart**, con el archivo como adjunto real.
 
     POR QUÉ multipart y no una URL dentro del `content`: con la URL en el texto
@@ -747,6 +748,11 @@ def create_message_with_attachment(conversation_id: int, content: str, *, filena
         "message_type": "outgoing",
         "private": "true" if private else "false",
     }
+    if content_attributes:
+        # Va como string JSON porque el cuerpo es multipart, igual que en
+        # `create_message_with_attachments` — un dict anidado no sobrevive al
+        # encoding de formulario.
+        form["content_attributes"] = json.dumps(content_attributes)
     try:
         resp = requests.post(
             url,

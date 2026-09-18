@@ -322,13 +322,18 @@ def _enviar_bienvenida(doc):
     conv = panel.abrir_conversacion(inbox_id=inbox_id, phone=doc.telefono,
                                     name=doc.nombre, pausar=False)
     conversation_id = conv["conversation_id"]
+    from ..utils import autoria
     from ..utils import chatwoot_client as cw
-    cw.create_message(conversation_id, saludo)
+    cw.create_message(conversation_id, saludo,
+                      content_attributes=autoria.marca_automatica(
+                          "bienvenida", "Bienvenida del formulario web"))
     for clave in _productos_de(doc):
         mensaje = PRODUCTOS[clave]["mensaje"]
         if mensaje:
             time.sleep(PAUSA_ENTRE_MENSAJES)
-            cw.create_message(conversation_id, mensaje)
+            cw.create_message(conversation_id, mensaje,
+                              content_attributes=autoria.marca_automatica(
+                                  "bienvenida", "Bienvenida del formulario web — producto"))
 
     if doc.crm_lead and frappe.db.exists("CRM Lead", doc.crm_lead):
         frappe.db.set_value("CRM Lead", doc.crm_lead,
