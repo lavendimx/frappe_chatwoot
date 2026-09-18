@@ -67,7 +67,12 @@ SALUDO = (
     "Producto de interés:\n{productos}"
 )
 
-LEAD_OWNER_DEFAULT = "valente.flores@lavendi.mx"
+# Alejandro es el propietario de todas las oportunidades de Sofía CRM (decisión
+# suya, 2026-09-18). Importa más de lo que parece: al convertir un lead,
+# `CRM Lead.LEAD_DEAL_FIELD_MAP` copia `lead_owner` a `deal_owner`, así que este
+# default define también de quién es la oportunidad que nace de ese lead.
+# Propiedad ≠ asignación: quién trabaja cada caso sigue siendo el `_assign`.
+LEAD_OWNER_DEFAULT = "alejandro.moreno@lavendi.mx"
 
 # Ventana en la que GHL dejaba salir el saludo: L-V 08:00-18:00. Un lead que
 # llega un sábado a las 23:00 recibe su WhatsApp el lunes a las 08:00, no de
