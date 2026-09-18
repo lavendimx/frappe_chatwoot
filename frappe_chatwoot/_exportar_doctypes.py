@@ -17,12 +17,15 @@ import frappe
 
 DOCTYPES = [
     "Agente IA",
+    "Campana Email",
+    "Campana Email Paso",
     "Chatwoot Pausa",
     "KB Inbox",
     "KB Source",
     "Mensaje Programado",
     "Mensaje Programado Adjunto",
     "Plantilla",
+    "Plantilla de Planeacion",
     "Reunion Agendada",
     "Secuencia",
     "Secuencia Inscripcion",

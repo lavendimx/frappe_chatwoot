@@ -33,8 +33,9 @@ scheduler_events = {
             "frappe_chatwoot.utils.programados.enviar_programados",
         ],
         # Recordatorio de videollamada 1 h antes — reemplaza el workflow 5 de
-        # GHL. Cada 15 min sobre una ventana de 30, para que una corrida
-        # saltada no pierda la cita. Sale en la primera línea si el
+        # GHL. Cada 15 min sobre una ventana asimétrica [-15, +3] min respecto
+        # a los 60, para que una corrida saltada no pierda la cita sin que el
+        # primer tick la marque a 75 min. Sale en la primera línea si el
         # interruptor está apagado.
         "*/15 * * * *": [
             "frappe_chatwoot.utils.recordatorios.enviar_recordatorios",
@@ -47,13 +48,42 @@ scheduler_events = {
             "frappe_chatwoot.utils.captacion.enviar_bienvenidas",
         ],
         # Motor de secuencias PVP — réplica de «4. Seguimientos» de GHL.
-        # UNA corrida diaria dentro de la ventana 12-18 L-V; `avanzar()` sale en
-        # la primera línea si `Chatwoot Settings.secuencias_activas` está en 0,
-        # así que registrar el job NO enciende nada. Encender son DOS
-        # interruptores: el global y `Secuencia.activa`. Habilitado por
-        # Alejandro el 2026-09-15 (WhatsApp real a 28 deals).
-        "0 15 * * 1-5": [
+        # `avanzar()` sale en la primera línea si
+        # `Chatwoot Settings.secuencias_activas` está en 0, así que registrar el
+        # job NO enciende nada. Encender son DOS interruptores: el global y
+        # `Secuencia.activa`. Habilitado por Alejandro el 2026-09-15 (WhatsApp
+        # real a 28 deals).
+        #
+        # Una corrida por hora dentro de la ventana laboral 12-18 L-V (7 al día),
+        # no una sola: con `Secuencia.max_por_corrida = 6` el tope real pasa de 6
+        # a 42 mensajes diarios, que es lo que hace falta para drenar un atraso
+        # sin mandar una ráfaga concentrada a la misma hora. Cambiado por
+        # Alejandro el 2026-09-17, junto con la inserción del checklist de compra
+        # como 2do seguimiento.
+        #
+        # OJO: este valor es la fuente de verdad. `bench migrate` resincroniza
+        # `Scheduled Job Type` desde aquí — editar solo la fila de la DB se
+        # revierte al siguiente migrate (fue lo que pasó con el intento del
+        # 2026-09-16 de moverlo a `0 12`, que nunca llegó a estar vivo).
+        "0 12-18 * * 1-5": [
             "frappe_chatwoot.utils.secuencias.avanzar",
+        ],
+        # Preparación de llamada v2 — reemplaza el script GHL de
+        # /root/projects/ventas (retirado). El disparo NO es una ventana
+        # antes de la cita: es "al detectar la cita nueva" (Alejandro,
+        # 2026-09-18), así que basta un barrido horario en horario hábil —
+        # el volumen real es ~8 citas en dos semanas. Sale en la primera
+        # línea si `Chatwoot Settings.planeacion_llamadas_activo` está en 0.
+        "0 7-21 * * *": [
+            "frappe_chatwoot.utils.planeacion_llamadas.generar_planeaciones",
+        ],
+        # Campañas de email programadas — plan campanas-contenedor-y-cadencia.md.
+        # Barrido diario en horario laboral, no por hora: la cadencia se mide
+        # en días (espera_dias), no en minutos, así que una corrida diaria
+        # basta. Sale en la primera línea si Chatwoot Settings.campanas_automaticas
+        # está en 0 (nace apagado) — registrar el job NO enciende nada.
+        "0 9 * * 1-5": [
+            "frappe_chatwoot.utils.campana_email.avanzar",
         ],
     },
 }
@@ -77,7 +107,10 @@ doc_events = {
         "before_insert": "frappe_chatwoot.utils.kb_isolation.set_inbox_from_user_permission",
     },
     "CRM Deal": {
-        "on_update": "frappe_chatwoot.utils.onboarding.on_deal_update",
+        "on_update": [
+            "frappe_chatwoot.utils.onboarding.on_deal_update",
+            "frappe_chatwoot.utils.nutricion.on_deal_update",
+        ],
     },
     # Solicitud Web → Contacto + CRM Lead. Reemplaza el trigger "Formulario
     # Recibido" de los workflows 1.2 (PVP) y 1.3 (PWP/EGT) de GHL. El handler
@@ -165,6 +198,7 @@ DOCTYPES_PROPIOS = [
     "Mensaje Programado",
     "Mensaje Programado Adjunto",
     "Plantilla",
+    "Plantilla de Planeacion",
     "Reunion Agendada",
     "Secuencia",
     "Secuencia Inscripcion",
@@ -173,6 +207,10 @@ DOCTYPES_PROPIOS = [
     "Sofia Push Subscription",
     "Solicitud Web",
     "Stripe Settings",
+    # Campañas de email programadas (2026-09-18, plan
+    # campanas-contenedor-y-cadencia.md): contenedor + pasos con cadencia.
+    "Campana Email",
+    "Campana Email Paso",
 ]
 
 # Doctypes de terceros (crm) que extendimos con campos propios.
@@ -182,6 +220,9 @@ DOCTYPES_EXTENDIDOS = [
     "CRM Task",
     "CRM Organization",
     "Contact",
+    # serie_* (obsoletos, ocultos) + futuros campos propios sobre el
+    # Newsletter del core — sin esto no viajan a sitios de cliente.
+    "Newsletter",
 ]
 
 # Doctypes que solo existen si erpnext esta instalado. Sus campos, property
