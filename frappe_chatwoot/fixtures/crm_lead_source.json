@@ -3,6 +3,14 @@
   "details": null,
   "docstatus": 0,
   "doctype": "CRM Lead Source",
+  "modified": "2026-09-18 08:05:07.903133",
+  "name": "COPARMEX",
+  "source_name": "COPARMEX"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
   "modified": "2026-09-04 03:13:22.073989",
   "name": "Email",
   "source_name": "Email"
