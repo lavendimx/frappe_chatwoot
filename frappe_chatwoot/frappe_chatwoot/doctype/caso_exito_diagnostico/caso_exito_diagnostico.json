@@ -1,0 +1,18 @@
+{
+ "doctype": "DocType",
+ "name": "Caso Exito Diagnostico",
+ "module": "Frappe Chatwoot",
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "creation": "2026-09-19 00:00:00.000000",
+ "modified": "2026-09-19 00:00:00.000000",
+ "owner": "Administrator",
+ "modified_by": "Administrator",
+ "fields": [
+  {"fieldname": "nombre", "fieldtype": "Data", "label": "Nombre (anonimizado si aplica)", "reqd": 1, "in_list_view": 1, "columns": 3},
+  {"fieldname": "sector", "fieldtype": "Data", "label": "Sector", "reqd": 1, "in_list_view": 1, "columns": 3},
+  {"fieldname": "hallazgo", "fieldtype": "Small Text", "label": "Hallazgo", "reqd": 1, "in_list_view": 1, "columns": 6}
+ ],
+ "permissions": []
+}

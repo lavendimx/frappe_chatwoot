@@ -1,0 +1,17 @@
+{
+ "doctype": "DocType",
+ "name": "Caso Exito Stat",
+ "module": "Frappe Chatwoot",
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "creation": "2026-09-19 00:00:00.000000",
+ "modified": "2026-09-19 00:00:00.000000",
+ "owner": "Administrator",
+ "modified_by": "Administrator",
+ "fields": [
+  {"fieldname": "numero", "fieldtype": "Data", "label": "Número (ej. +41%, $87)", "reqd": 1, "in_list_view": 1, "columns": 4},
+  {"fieldname": "etiqueta", "fieldtype": "Data", "label": "Etiqueta", "reqd": 1, "in_list_view": 1, "columns": 8}
+ ],
+ "permissions": []
+}
