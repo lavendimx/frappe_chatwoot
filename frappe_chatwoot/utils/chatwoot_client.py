@@ -1000,6 +1000,62 @@ def list_inboxes() -> list[dict]:
     return data.get("payload") or []
 
 
+# Añadido por lavendi.mx (fork sofía) — asignación de conversaciones.
+#
+# Es la pieza "B" del handover de asesor de Estrublock (decisión #19 del plan de
+# migración GHL → Sofía GPT, aprobada por Alejandro el 2026-09-19): al escalar, la
+# conversación se asigna a la asesora dueña del contacto y le aparece en "Asignadas
+# a mí", que es la bandeja que ya usa todo el día. Hasta ahora este wrapper no tenía
+# forma de asignar nada — sabía leer conversaciones y escribir mensajes, pero el
+# handover terminaba en `api/push.py::notify_handover`, un canal con 0 suscripciones.
+#
+# El agente IA (Node, `lib/handover.js` del repo agente-ia) pega directo al endpoint
+# de Chatwoot con su propio token y no pasa por aquí; estas funciones existen para
+# que el CRM/Desk pueda hacer y consultar lo mismo sin que el conocimiento de la API
+# de Chatwoot se duplique en dos sitios con criterios distintos.
+
+
+def list_agents() -> list[dict]:
+    """GET /agents — lista plana (array desnudo, sin envoltorio), cada elemento con
+    `id`, `email`, `name`, `role` y `availability_status`.
+
+    El puente entre los dos mundos es el CORREO: Frappe identifica a la asesora por
+    `deal_owner` (un email) y Chatwoot por id numérico. Cacheado al TTL por defecto —
+    dar de alta a un agente es un evento de onboarding, no tráfico."""
+    data = _get("/agents")
+    return data if isinstance(data, list) else (data.get("payload") or [])
+
+
+def agent_id_for_email(email: str) -> int | None:
+    """Id de agente de Chatwoot para un correo de usuario de Frappe, o None.
+
+    None NO es un error: significa que esa persona existe en el CRM pero no tiene
+    cuenta de agente en Chatwoot. Quien llama debe degradar (en el handover eso es
+    caer al ToDo de respaldo), nunca asignarle la conversación a otra persona."""
+    objetivo = (email or "").strip().lower()
+    if not objetivo:
+        return None
+    for agent in list_agents():
+        if (agent.get("email") or "").strip().lower() == objetivo:
+            return agent.get("id")
+    return None
+
+
+def assign_conversation(conversation_id: int, assignee_id: int | None) -> dict:
+    """POST /conversations/{id}/assignments — asigna (o desasigna) la conversación.
+
+    `assignee_id=0` es la forma que Chatwoot documenta para DESASIGNAR; se mapea
+    desde `None` para que quien llama no tenga que conocer esa convención.
+
+    La respuesta es el objeto del usuario asignado (bare), no un `{"success": ...}`:
+    no conviene depender de su forma más allá de que un 2xx significa que la
+    asignación se aplicó."""
+    return _post(
+        f"/conversations/{conversation_id}/assignments",
+        {"assignee_id": 0 if assignee_id is None else int(assignee_id)},
+    )
+
+
 # Prefijo de Active Storage (el almacén de archivos de Rails, sobre el que corre
 # Chatwoot). Es el único path que el proxy de adjuntos acepta.
 ACTIVE_STORAGE_PREFIX = "/rails/active_storage/"
