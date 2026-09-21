@@ -139,16 +139,14 @@ doc_events = {
     },
     # CRM Task → contacto/organización/oportunidad: `CRM Task` solo trae un
     # vínculo, así que en el panel de Tareas se veían aisladas (2026-09-15).
-    # after_insert → push al usuario asignado (2026-09-20): cubre el caso real
-    # (tarea creada ya con `assigned_to`). Deliberadamente NO también en
-    # `on_update`: Frappe corre on_update también durante el propio insert (no
-    # solo en ediciones posteriores), así que registrar ambos disparaba la
-    # función dos veces en la misma alta — y el segundo `.save()` posterior
-    # tronaba con `TimestampMismatchError`. La reasignación (editar una tarea
-    # ya existente para cambiarle el asignado) queda sin push por ahora.
+    # after_insert + on_update → push al usuario asignado, en alta y en
+    # reasignación (2026-09-20, ampliado 2026-09-21). El guard contra el doble
+    # disparo del insert (`doc.flags.in_insert`) vive dentro de
+    # `notificar_asignacion`, no aquí — ver su docstring.
     "CRM Task": {
         "validate": "frappe_chatwoot.utils.tareas.autollenar",
         "after_insert": "frappe_chatwoot.utils.tareas.notificar_asignacion",
+        "on_update": "frappe_chatwoot.utils.tareas.notificar_asignacion",
     },
 }
 

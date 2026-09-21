@@ -65,23 +65,33 @@ def autollenar(doc, method=None):
 
 
 def notificar_asignacion(doc, method=None):
-    """doc_event `after_insert` de CRM Task — push al usuario asignado.
+    """doc_event de CRM Task (`after_insert` + `on_update`) — push al usuario
+    asignado, en alta y en reasignación.
 
-    Solo `after_insert`, a propósito: Frappe corre `on_update` también durante el
-    propio insert (no solo en ediciones posteriores de un doc ya existente), así que
-    registrar esta misma función en ambos eventos la disparaba dos veces en la misma
-    alta — y el segundo `.save()` de la request tronaba con `TimestampMismatchError`
-    (encontrado validando este cambio, 2026-09-20). Cubre el caso real: una tarea que
-    nace con `assigned_to`. La reasignación de una tarea ya existente no reavisa por
-    ahora. Nunca lanza: un fallo de push no puede tumbar el guardado de la tarea,
-    igual que `autollenar`."""
+    `on_update` se excluye mientras `doc.flags.in_insert` sigue prendido: Frappe
+    corre `on_update` también durante el propio `insert()` (antes de limpiar
+    `__islocal`/`in_insert`), así que sin este guard la misma alta dispararía el
+    aviso dos veces y el segundo `.save()` de la request tronaba con
+    `TimestampMismatchError` (encontrado el 2026-09-20, mismo bug documentado en
+    `hooks.py`). En reasignación (on_update fuera de insert), solo avisa si
+    `assigned_to` de verdad cambió — editar cualquier otro campo de una tarea ya
+    asignada no debe reavisar. Nunca lanza: un fallo de push no puede tumbar el
+    guardado de la tarea, igual que `autollenar`."""
+    if method == "on_update":
+        if doc.flags.in_insert:
+            return
+        if not doc.has_value_changed("assigned_to"):
+            return
+        titulo = "Tarea reasignada a ti"
+    else:
+        titulo = "Nueva tarea asignada"
     asignado = doc.get("assigned_to")
     if not asignado or asignado == frappe.session.user:
         return
     try:
         push.notify_user(
             asignado,
-            title="Nueva tarea asignada",
+            title=titulo,
             body=(doc.get("title") or "Sin título")[:120],
             url="/crm/tasks",
             tag=f"tarea-{doc.name}",
