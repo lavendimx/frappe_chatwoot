@@ -236,3 +236,161 @@ class TestChatwootApiClearCache(FrappeTestCase):
             result = api.clear_chatwoot_cache()
         self.assertEqual(result, {"ok": True})
         mock_clear.assert_called_once()
+
+
+def _conv(cid, identifier=None, nombre="Alguien"):
+    """Conversación con la forma que devuelve la API de lista de Chatwoot —
+    lo mínimo que _shape_conversation lee."""
+    return {
+        "id": cid,
+        "inbox_id": 5,
+        "status": "open",
+        "meta": {"sender": {"name": nombre, "identifier": identifier}},
+        "last_non_activity_message": {"content": "hola", "message_type": 0},
+    }
+
+
+class TestDeteccionDeGrupo(FrappeTestCase):
+    """Los grupos de WhatsApp se separan de las conversaciones con personas por
+    el JID que Evolution guarda en el identifier del contacto — nunca por el
+    nombre, que cualquiera puede cambiar desde Chatwoot."""
+
+    def test_jid_de_grupo_es_grupo(self):
+        self.assertTrue(api._es_grupo({"identifier": "120363041982978889@g.us"}))
+
+    def test_jid_individual_no_es_grupo(self):
+        self.assertFalse(api._es_grupo({"identifier": "5213330067027@s.whatsapp.net"}))
+
+    def test_contacto_sin_identifier_no_es_grupo(self):
+        # Contacto creado a mano desde la UI: solo tiene teléfono.
+        self.assertFalse(api._es_grupo({"identifier": None}))
+        self.assertFalse(api._es_grupo({}))
+
+    def test_el_nombre_no_decide(self):
+        # 9 de 9 grupos reales traen "(GROUP)" en el nombre, pero es renombrable.
+        self.assertFalse(api._es_grupo({"name": "Equipo (GROUP)", "identifier": "521@s.whatsapp.net"}))
+        self.assertTrue(api._es_grupo({"name": "Sin marca", "identifier": "1203@g.us"}))
+
+    def test_shape_expone_is_group(self):
+        grupo = api._shape_conversation(_conv(1, "1203@g.us"), set(), set())
+        persona = api._shape_conversation(_conv(2, "521@s.whatsapp.net"), set(), set())
+        self.assertTrue(grupo["is_group"])
+        self.assertFalse(persona["is_group"])
+
+
+class TestBarridoDeLaBandeja(FrappeTestCase):
+    """get_conversations barre TODAS las páginas de Chatwoot. Antes devolvía la
+    página 1 y dejaba fuera la mayor parte del canal (medido: 25 de 91, y 1 de 9
+    grupos) — con la lista partida en secciones eso vaciaba la de grupos."""
+
+    def setUp(self):
+        frappe.cache().delete_value("frappe_chatwoot:bandeja_profunda:5:all")
+
+    def tearDown(self):
+        frappe.cache().delete_value("frappe_chatwoot:bandeja_profunda:5:all")
+
+    def _paginas(self, *paginas):
+        def fake(inbox_id=None, status=None, page=1):
+            return paginas[page - 1] if page <= len(paginas) else []
+        return fake
+
+    def test_junta_todas_las_paginas(self):
+        with patch.object(api.cw, "list_conversations", side_effect=self._paginas(
+            [_conv(1)], [_conv(2)], [_conv(3)]
+        )):
+            ids = [c["id"] for c in api._barrer_canal(5, "all")]
+        self.assertEqual(sorted(ids), [1, 2, 3])
+
+    def test_pagina_uno_vacia_corta_sin_pedir_mas(self):
+        with patch.object(api.cw, "list_conversations", side_effect=self._paginas([])) as m:
+            self.assertEqual(api._barrer_canal(5, "all"), [])
+        self.assertEqual(m.call_count, 1)
+
+    def test_la_version_fresca_gana_sobre_la_cacheada(self):
+        # Una conversación que sube a la página 1 sigue en la copia cacheada de
+        # su página vieja; la buena es la nueva.
+        vieja = _conv(7, nombre="Viejo")
+        nueva = _conv(7, nombre="Nuevo")
+        with patch.object(api.cw, "list_conversations", side_effect=self._paginas([nueva], [vieja])):
+            res = api._barrer_canal(5, "all")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["meta"]["sender"]["name"], "Nuevo")
+
+    def test_las_paginas_profundas_quedan_en_cache(self):
+        # 2ª llamada: solo la página 1 vuelve a pedirse (1 petición, no 3).
+        with patch.object(api.cw, "list_conversations", side_effect=self._paginas(
+            [_conv(1)], [_conv(2)], [_conv(3)]
+        )) as m:
+            api._barrer_canal(5, "all")
+            llamadas_frio = m.call_count
+        with patch.object(api.cw, "list_conversations", side_effect=self._paginas(
+            [_conv(1)], [_conv(2)], [_conv(3)]
+        )) as m2:
+            ids = [c["id"] for c in api._barrer_canal(5, "all")]
+        self.assertEqual(llamadas_frio, 4)  # 3 con datos + 1 vacía que corta
+        self.assertEqual(m2.call_count, 1)
+        self.assertEqual(sorted(ids), [1, 2, 3])
+
+    def test_tope_de_paginas_se_registra_en_el_log(self):
+        infinita = lambda inbox_id=None, status=None, page=1: [_conv(page)]
+        with patch.object(api.cw, "list_conversations", side_effect=infinita):
+            with patch.object(api, "MAX_PAGINAS_BANDEJA", 3):
+                with patch("frappe.log_error") as log:
+                    res = api._barrer_canal(5, "all")
+        log.assert_called_once()
+        self.assertEqual(len(res), 3)
+
+
+class TestArchivadoEnLaBandeja(FrappeTestCase):
+    """Archivar es una bandera del CRM, no el estado de Chatwoot: la bandeja
+    muestra o las vivas o las archivadas, nunca mezcladas."""
+
+    def test_shape_expone_archived(self):
+        marcada = api._shape_conversation(_conv(9), set(), {9})
+        libre = api._shape_conversation(_conv(10), set(), set())
+        self.assertTrue(marcada["archived"])
+        self.assertFalse(libre["archived"])
+
+    def test_shape_expone_agent_paused_sin_consultar_la_db(self):
+        pausada = api._shape_conversation(_conv(11), {11}, set())
+        self.assertTrue(pausada["agent_paused"])
+
+    def test_ids_marcados_degrada_si_el_doctype_no_existe(self):
+        # Instalación a medio migrar: la bandeja no debe tumbarse.
+        self.assertEqual(api._ids_marcados("Doctype Que No Existe"), set())
+
+
+class TestResolverConversacionPorId(FrappeTestCase):
+    """Los enlaces directos (?conv=, ruta móvil, buscador global, push) no pueden
+    depender del filtro de la lista: una conversación archivada o de otro canal
+    no aparecía ahí y la pantalla quedaba vacía sin explicar por qué."""
+
+    def test_devuelve_la_conversacion_con_forma_de_bandeja(self):
+        _configure_settings(enabled=1)
+        try:
+            with patch.object(api.cw, "get_conversation", return_value=_conv(5, "1203@g.us")):
+                r = api.obtener_conversacion(5)
+        finally:
+            _configure_settings(enabled=0)
+        self.assertEqual(r["id"], 5)
+        self.assertTrue(r["is_group"])
+        self.assertIn("archived", r)
+
+    def test_id_invalido_devuelve_none(self):
+        _configure_settings(enabled=1)
+        try:
+            self.assertIsNone(api.obtener_conversacion(0))
+        finally:
+            _configure_settings(enabled=0)
+
+    def test_degrada_a_none_si_chatwoot_no_responde(self):
+        _configure_settings(enabled=1)
+        try:
+            with patch.object(api.cw, "get_conversation", side_effect=cw.ChatwootAPIError("caido")):
+                self.assertIsNone(api.obtener_conversacion(5))
+        finally:
+            _configure_settings(enabled=0)
+
+    def test_degrada_a_none_si_chatwoot_esta_deshabilitado(self):
+        _configure_settings(enabled=0)
+        self.assertIsNone(api.obtener_conversacion(5))

@@ -711,6 +711,35 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
 
 
 @frappe.whitelist()
+def obtener_conversacion(conversation_id: int) -> dict | None:
+    """Una conversación por id, con la forma de la bandeja, sin pasar por el
+    filtro de la lista.
+
+    Existe porque la bandeja resuelve los enlaces directos (`?conv=`, la ruta
+    móvil `/conversaciones/:id`, el buscador global, las notificaciones push)
+    buscando el id dentro de la lista ya cargada. Eso falla en silencio —no
+    abre nada— cuando la conversación no está en el filtro activo: archivada,
+    de otro canal, o de un estado que la vista no pide. Aquí se pregunta por
+    ella directamente.
+    """
+    validate_role()
+    if not is_chatwoot_enabled():
+        return None
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        return None
+    try:
+        conv = cw.get_conversation(cid)
+    except cw.ChatwootAPIError:
+        return None
+    if not conv:
+        return None
+    return _shape_conversation(
+        conv, _ids_marcados("Chatwoot Pausa"), _ids_marcados("Chatwoot Archivo")
+    )
+
+
+@frappe.whitelist()
 def archivar(conversation_id: int, inbox_id=None) -> dict:
     """Saca una conversación de la bandeja principal sin borrarla.
 
