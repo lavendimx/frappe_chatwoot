@@ -85,6 +85,15 @@ scheduler_events = {
         "0 9 * * 1-5": [
             "frappe_chatwoot.utils.campana_email.avanzar",
         ],
+        # Aviso push de facturas vencidas — no existía ningún escaneo proactivo,
+        # solo la pantalla /crm/facturacion que había que abrir a mano. Una vez
+        # al día (no cada hora: "Overdue" no cambia dentro del mismo día) y en
+        # horario hábil. Sale en la primera línea si
+        # Chatwoot Settings.aviso_facturas_vencidas_activo está en 0 (nace
+        # apagado) — registrar el job NO enciende nada.
+        "0 8 * * 1-5": [
+            "frappe_chatwoot.utils.facturas_vencidas.avisar_vencidas",
+        ],
     },
 }
 
@@ -130,8 +139,16 @@ doc_events = {
     },
     # CRM Task → contacto/organización/oportunidad: `CRM Task` solo trae un
     # vínculo, así que en el panel de Tareas se veían aisladas (2026-09-15).
+    # after_insert → push al usuario asignado (2026-09-20): cubre el caso real
+    # (tarea creada ya con `assigned_to`). Deliberadamente NO también en
+    # `on_update`: Frappe corre on_update también durante el propio insert (no
+    # solo en ediciones posteriores), así que registrar ambos disparaba la
+    # función dos veces en la misma alta — y el segundo `.save()` posterior
+    # tronaba con `TimestampMismatchError`. La reasignación (editar una tarea
+    # ya existente para cambiarle el asignado) queda sin push por ahora.
     "CRM Task": {
         "validate": "frappe_chatwoot.utils.tareas.autollenar",
+        "after_insert": "frappe_chatwoot.utils.tareas.notificar_asignacion",
     },
 }
 

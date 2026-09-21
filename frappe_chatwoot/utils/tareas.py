@@ -21,6 +21,8 @@ No pisa lo que el humano puso
 
 import frappe
 
+from frappe_chatwoot.frappe_chatwoot.api import push
+
 
 def _org_por_nombre(nombre: str | None) -> str | None:
     if not nombre:
@@ -60,6 +62,32 @@ def autollenar(doc, method=None):
             doc.organizacion = doc.get("organizacion") or ref_dn
     except Exception as exc:
         frappe.log_error(f"tareas.autollenar: {exc}", "Tareas")
+
+
+def notificar_asignacion(doc, method=None):
+    """doc_event `after_insert` de CRM Task — push al usuario asignado.
+
+    Solo `after_insert`, a propósito: Frappe corre `on_update` también durante el
+    propio insert (no solo en ediciones posteriores de un doc ya existente), así que
+    registrar esta misma función en ambos eventos la disparaba dos veces en la misma
+    alta — y el segundo `.save()` de la request tronaba con `TimestampMismatchError`
+    (encontrado validando este cambio, 2026-09-20). Cubre el caso real: una tarea que
+    nace con `assigned_to`. La reasignación de una tarea ya existente no reavisa por
+    ahora. Nunca lanza: un fallo de push no puede tumbar el guardado de la tarea,
+    igual que `autollenar`."""
+    asignado = doc.get("assigned_to")
+    if not asignado or asignado == frappe.session.user:
+        return
+    try:
+        push.notify_user(
+            asignado,
+            title="Nueva tarea asignada",
+            body=(doc.get("title") or "Sin título")[:120],
+            url="/crm/tasks",
+            tag=f"tarea-{doc.name}",
+        )
+    except Exception as exc:
+        frappe.log_error(f"tareas.notificar_asignacion: {exc}", "Tareas")
 
 
 @frappe.whitelist()

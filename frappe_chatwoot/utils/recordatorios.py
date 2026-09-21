@@ -23,6 +23,7 @@ import frappe
 
 from . import autoria
 from ..frappe_chatwoot.api import chatwoot as api_cw
+from ..frappe_chatwoot.api import push
 
 # Ventana del barrido, asimétrica a propósito: HOLGURA_ATRAS es más ancha que
 # el intervalo del cron para que, si una corrida se salta (reinicio, cola
@@ -79,6 +80,25 @@ def _conversacion(reunion):
     return ""
 
 
+def _responsable(reunion):
+    """Usuario Frappe a avisar por push de "tu cita es en 1 hora" — el dueño del
+    deal/lead ligado al contacto de la cita. Sin contacto o sin deal/lead con dueño
+    no hay a quién atribuírsela individualmente; se omite en vez de hacer broadcast
+    a todo el equipo por cada cita (fatiga de alertas, mismo criterio ya aplicado en
+    `push.py` — el WhatsApp al cliente ya salió de cualquier forma)."""
+    contacto = (reunion.get("crm_contacto") or "").strip()
+    if not contacto:
+        return None
+    for doctype, campo in (("CRM Deal", "deal_owner"), ("CRM Lead", "lead_owner")):
+        fila = frappe.get_all(
+            doctype, filters={"contact": contacto}, fields=[campo],
+            order_by="modified desc", limit=1,
+        )
+        if fila and fila[0].get(campo):
+            return fila[0][campo]
+    return None
+
+
 def enviar_recordatorios():
     """Scheduler cada 15 minutos. Barato: una consulta acotada por fecha; si
     no hay citas en la ventana no hace nada más."""
@@ -118,6 +138,21 @@ def enviar_recordatorios():
             frappe.db.set_value("Reunion Agendada", cita.name, "recordatorio_enviado_at",
                                 ahora, update_modified=False)
             enviados.append(cita.name)
+            try:
+                responsable = _responsable(cita)
+                if responsable:
+                    push.notify_user(
+                        responsable,
+                        title="Videollamada en 1 hora",
+                        body=f"Con {cita.nombre_participante or 'contacto'}",
+                        url=f"/crm/conversaciones?conv={conv}",
+                        tag=f"cita-{cita.name}",
+                    )
+            except Exception:
+                # El push es adicional — el WhatsApp real al cliente ya salió
+                # (línea de arriba); un fallo aquí no debe verse como fallo del
+                # recordatorio.
+                pass
         except Exception as exc:
             # No se marca: un fallo de red merece reintento en la corrida
             # siguiente, que todavía cae dentro de la ventana.
