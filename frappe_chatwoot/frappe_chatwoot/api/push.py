@@ -148,6 +148,18 @@ def notify_user(user: str, title: str, body: str, url: str = None, tag: str = No
                 frappe.db.commit()
             else:
                 frappe.log_error(f"Sofia Push: fallo enviando a {sub.name}: {e}", "sofia_push")
+        except Exception as e:
+            # 2026-09-21: hallado en producción — un `vapid_private_key` en formato
+            # incorrecto (ej. DER/PKCS8 en vez del raw base64url de 32 bytes que espera
+            # pywebpush) revienta DENTRO de la firma de `webpush()`, antes de tocar la
+            # red: `cryptography` lanza `ValueError: Could not deserialize key data`, que
+            # NO hereda de `WebPushException` y por eso no lo cachaba el except de arriba
+            # — quedaba como excepción sin manejar en cada invocación. Es un problema de
+            # configuración del SITIO (la llave), no de esta suscripción puntual: seguir
+            # iterando `subs` fallaría idéntico en cada una, así que se registra UNA vez
+            # y se corta el loop en vez de ensuciar el log por cada suscriptor.
+            frappe.log_error(f"Sofia Push: vapid_private_key inválida o config rota: {e}", "sofia_push")
+            return
 
 
 @frappe.whitelist()
