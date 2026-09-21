@@ -526,6 +526,10 @@ def list_inboxes() -> list[dict]:
 # grande (lavendi.mx) son 91 conversaciones = 4 páginas.
 MAX_PAGINAS_BANDEJA = 10
 
+# Segundos que se guardan en caché las páginas PROFUNDAS del barrido (2 en
+# adelante). Ver _barrer_canal.
+TTL_PAGINAS_PROFUNDAS = 60
+
 
 def _es_grupo(sender: dict) -> bool:
     """Un grupo de WhatsApp se reconoce por el JID que Evolution API guarda en el
@@ -605,6 +609,61 @@ def _ids_marcados(doctype: str) -> set:
         return set()
 
 
+def _barrer_canal(canal: int, status: str) -> list[dict]:
+    """Todas las páginas del canal, con la página 1 SIEMPRE fresca y las
+    profundas en caché.
+
+    El motivo del reparto: la bandeja recarga por polling cada 8 s, y barrer 4-5
+    páginas en cada ciclo multiplica por 5 el tráfico contra Chatwoot sin ganar
+    nada — una conversación de la página 3 no se mueve sola. Pero cachear TODO
+    metería el retraso del caché en la llegada de mensajes nuevos, que es
+    justamente lo que la bandeja tiene que mostrar rápido.
+
+    Chatwoot ordena por actividad, así que todo lo que cambia entra por la
+    página 1: dejándola fuera del caché la latencia de un mensaje nuevo queda
+    igual que antes de este cambio, y en régimen el barrido cuesta 1 petición en
+    vez de 5.
+
+    La dedup por id prefiere la versión fresca: una conversación que acaba de
+    subir a la página 1 también sigue en la copia cacheada de su página vieja,
+    y la buena es la nueva.
+    """
+    frescas = cw.list_conversations(inbox_id=canal, status=status, page=1)
+    if len(frescas) == 0:
+        return []
+
+    clave = f"frappe_chatwoot:bandeja_profunda:{canal}:{status}"
+    cache = frappe.cache()
+    # `expires=True` es obligatorio aquí, no cosmético: sin él, un get que
+    # devuelve None deja ese None guardado en el caché local del proceso
+    # (frappe.local.cache), y el set_value con expires_in_sec NO lo actualiza —
+    # solo escribe en Redis. Resultado: el caché nunca pegaba y el barrido
+    # seguía costando 5 peticiones en cada poll.
+    profundas = cache.get_value(clave, expires=True)
+
+    if profundas is None:
+        profundas = []
+        for pagina in range(2, MAX_PAGINAS_BANDEJA + 1):
+            lote = cw.list_conversations(inbox_id=canal, status=status, page=pagina)
+            if not lote:
+                break
+            profundas.extend(lote)
+        else:
+            frappe.log_error(
+                title="Bandeja truncada: se alcanzó el tope de páginas",
+                message=(
+                    f"canal={canal} status={status}: se leyeron {MAX_PAGINAS_BANDEJA} páginas "
+                    f"({len(frescas) + len(profundas)} conversaciones) y Chatwoot seguía "
+                    "devolviendo más. Subir MAX_PAGINAS_BANDEJA o paginar la bandeja de verdad."
+                ),
+            )
+        cache.set_value(clave, profundas, expires_in_sec=TTL_PAGINAS_PROFUNDAS)
+
+    por_id = {c.get("id"): c for c in profundas}
+    por_id.update({c.get("id"): c for c in frescas})
+    return list(por_id.values())
+
+
 @frappe.whitelist()
 def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas=0) -> list[dict]:
     """Bandeja completa. Degrada suave (lista vacía) si Chatwoot no está
@@ -617,10 +676,12 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
     3 y 4, invisibles. Con la lista partida en individuales y grupos eso dejaba
     la sección de grupos prácticamente vacía sin que nada lo indicara.
 
-    Costo medido del barrido: 0.68 s contra 0.21 s de una sola página (5
-    peticiones a Chatwoot en vez de 1). Crece con el tamaño del canal, por eso
-    el tope de MAX_PAGINAS_BANDEJA, que se registra en el log cuando muerde en
-    vez de truncar en silencio.
+    Costo medido del barrido en frío: 0.68 s contra 0.21 s de una sola página (5
+    peticiones a Chatwoot en vez de 1). En régimen vuelve a costar 1 petición
+    porque las páginas profundas quedan en caché — ver _barrer_canal, que
+    explica por qué la página 1 se deja siempre fresca. Crece con el tamaño del
+    canal, por eso el tope de MAX_PAGINAS_BANDEJA, que se registra en el log
+    cuando muerde en vez de truncar en silencio.
 
     `page` se conserva en la firma porque el frontend viejo lo mandaba; ya no se
     usa — pedir una página suelta es justo lo que causaba el problema.
@@ -636,21 +697,7 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
     # aparecia en la bandeja de lavendi.mx). Ver docs/project_agente_whatsapp.md.
     canal = frappe.utils.cint(inbox_id) or _default_inbox_id()
 
-    conversations = []
-    for pagina in range(1, MAX_PAGINAS_BANDEJA + 1):
-        lote = cw.list_conversations(inbox_id=canal, status=status, page=pagina)
-        if not lote:
-            break
-        conversations.extend(lote)
-    else:
-        frappe.log_error(
-            title="Bandeja truncada: se alcanzó el tope de páginas",
-            message=(
-                f"canal={canal} status={status}: se leyeron {MAX_PAGINAS_BANDEJA} páginas "
-                f"({len(conversations)} conversaciones) y Chatwoot seguía devolviendo más. "
-                "Subir MAX_PAGINAS_BANDEJA o paginar la bandeja de verdad."
-            ),
-        )
+    conversations = _barrer_canal(canal, status)
 
     pausadas = _ids_marcados("Chatwoot Pausa")
     archivadas_ids = _ids_marcados("Chatwoot Archivo")
