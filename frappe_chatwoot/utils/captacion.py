@@ -104,24 +104,73 @@ def _telefono_corto(telefono):
     return digitos[-10:] if len(digitos) >= 10 else None
 
 
+# "Aquí ya no se trabaja". Un match contra uno de estos NO bloquea la creación
+# del lead: un prospecto perdido que vuelve a llenar el formulario es una
+# oportunidad nueva, no un duplicado. Medido en la base el 2026-09-21: de 3,773
+# deals, 3,306 están en `Lost` (la base migrada de GHL completa), y **56
+# teléfonos tienen a la vez un deal cerrado y uno abierto** — el equipo ya abría
+# oportunidad nueva a mano cuando un perdido regresaba. El dedup existe para no
+# duplicar trabajo ABIERTO, no para enterrar re-consultas.
+#
+# Se deriva del catálogo (`CRM Deal Status.type` / `CRM Lead Status.type`) y no
+# de una lista fija, para que un estatus nuevo que el equipo agregue quede
+# clasificado solo. Ojo con el mapeo, no es obvio:
+#   · `type == "Lost"`  → cerrado en ambos (Deal `Lost`; Lead `Junk`/`Unqualified`).
+#   · `type == "Won"`   → cerrado SOLO en Deal. En Lead, `Won` marca
+#     `Converted` y `Qualified`, que son trabajo VIVO — un lead calificado con
+#     el que el equipo está hablando (17 en la base) tratado como cerrado
+#     generaría un duplicado, justo lo contrario de lo que se busca. Si está
+#     `Converted` ya tiene su Deal, y el Deal gana por precedencia de todos modos.
+TIPOS_CERRADOS = {"CRM Deal": ("Lost", "Won"), "CRM Lead": ("Lost",)}
+DOCTYPE_ESTATUS = {"CRM Deal": "CRM Deal Status", "CRM Lead": "CRM Lead Status"}
+
+
+def _cerrados(doctype):
+    """Estatus cerrados de un doctype, leídos del catálogo en cada llamada.
+
+    Sin caché a propósito: son 16 filas y esto corre una vez por solicitud del
+    formulario (4 en los primeros 10 días del canal). Cachearlo solo abriría la
+    puerta a que el catálogo cambie y el dedup siga con la lista vieja.
+    """
+    return [f.name for f in frappe.get_all(
+        DOCTYPE_ESTATUS[doctype],
+        filters={"type": ["in", TIPOS_CERRADOS[doctype]]}, fields=["name"])]
+
+
 def _buscar_existente(telefono, email):
     """Misma regla que `lib/opportunities.js` del agente: la identidad es el
     teléfono (el 79% de la base no tiene correo) y el Deal gana sobre el Lead,
-    porque si ya hay oportunidad abierta ahí es donde el equipo trabaja."""
+    porque si ya hay oportunidad abierta ahí es donde el equipo trabaja.
+
+    Devuelve `(doctype, name, abierto)`. Un match **cerrado** se devuelve igual
+    —sirve para la nota cruzada— pero con `abierto=False`; el llamador crea el
+    lead nuevo de todos modos. Prioridad: un registro abierto siempre gana sobre
+    uno cerrado, sin importar en qué orden aparezcan.
+    """
     corto = _telefono_corto(telefono)
+    criterios = []
     if corto:
-        for doctype in ("CRM Deal", "CRM Lead"):
-            hallado = frappe.get_all(doctype, filters={"mobile_no": ["like", f"%{corto}"]},
-                                     fields=["name"], limit=1)
-            if hallado:
-                return doctype, hallado[0].name
+        criterios.append({"mobile_no": ["like", f"%{corto}"]})
     if email:
+        criterios.append({"email": email})
+
+    # Dos pasadas y no una: el abierto se pide con filtro explícito de estatus
+    # para que un contacto con varios registros cerrados no lo deje fuera.
+    for filtros in criterios:
         for doctype in ("CRM Deal", "CRM Lead"):
-            hallado = frappe.get_all(doctype, filters={"email": email},
+            abierto = frappe.get_all(
+                doctype,
+                filters=dict(filtros, status=["not in", _cerrados(doctype)]),
+                fields=["name"], limit=1)
+            if abierto:
+                return doctype, abierto[0].name, True
+    for filtros in criterios:
+        for doctype in ("CRM Deal", "CRM Lead"):
+            hallado = frappe.get_all(doctype, filters=filtros,
                                      fields=["name"], limit=1)
             if hallado:
-                return doctype, hallado[0].name
-    return None, None
+                return doctype, hallado[0].name, False
+    return None, None, False
 
 
 def _asegurar_contacto(doc):
@@ -146,7 +195,7 @@ def _asegurar_contacto(doc):
     return contacto.name
 
 
-def _crear_lead(doc):
+def _crear_lead(doc, cerrado=None):
     etiquetas = _etiquetas(doc)
     valor = max([PRODUCTOS[k]["valor"] for k in _productos_de(doc)] or [0])
     contacto = _asegurar_contacto(doc)
@@ -173,19 +222,85 @@ def _crear_lead(doc):
             setattr(lead, campo, valor_campo)
     lead.insert(ignore_permissions=True)
 
-    if etiquetas:
+    # Referencia cruzada cuando el prospecto ya había pasado por aquí y su único
+    # registro estaba cerrado. Sin esto el lead nuevo parece un contacto virgen
+    # y se pierde todo el historial de la vez anterior.
+    historial = ""
+    if cerrado and cerrado[0]:
+        historial = (f"<p>⟲ Ya había estado en el CRM: <b>{cerrado[0]} {cerrado[1]}</b> "
+                     "(cerrado). Se abrió oportunidad nueva porque volvió a "
+                     "solicitar por el formulario.</p>")
+        frappe.get_doc({
+            "doctype": "FCRM Note",
+            "title": "El prospecto volvió a solicitar por el formulario",
+            "content": (
+                f"<p>Nueva solicitud <b>{doc.name}</b> el {frappe.utils.now()}.</p>"
+                f"<p>Se abrió <b>CRM Lead {lead.name}</b>; este registro se deja "
+                "como está.</p>"
+                f"<p>Producto(s) de interés: {', '.join(etiquetas) or 'no especificado'}</p>"
+            ),
+            "reference_doctype": cerrado[0],
+            "reference_docname": cerrado[1],
+        }).insert(ignore_permissions=True)
+
+    if etiquetas or historial:
         frappe.get_doc({
             "doctype": "FCRM Note",
             "title": "Solicitud desde el formulario del sitio",
             "content": (
-                f"<p>Producto(s) de interés: <b>{', '.join(etiquetas)}</b></p>"
+                f"<p>Producto(s) de interés: <b>{', '.join(etiquetas) or 'no especificado'}</b></p>"
                 f"<p>Página: {doc.pagina_origen or 'no registrada'}</p>"
                 f"<p>Solicitud: {doc.name}</p>"
+                f"{historial}"
             ),
             "reference_doctype": "CRM Lead",
             "reference_docname": lead.name,
         }).insert(ignore_permissions=True)
     return lead.name, contacto
+
+
+def _registrar_resolicitud(doc, doctype, name):
+    """El contacto ya tiene trabajo VIVO: no se duplica la oportunidad, pero la
+    re-solicitud tiene que verse donde el equipo trabaja.
+
+    Antes de 2026-09-21 esta rama no dejaba ningún rastro en el CRM — ni nota,
+    ni tarea, ni aviso: el único registro era un texto dentro de la propia
+    `Solicitud Web`, que nadie abre. Caso real: SOL-2026-00040, el deal quedó
+    con `modified` intacto del día anterior.
+    """
+    etiquetas = _etiquetas(doc)
+    frappe.get_doc({
+        "doctype": "FCRM Note",
+        "title": "Nueva solicitud del formulario (ya tenía oportunidad abierta)",
+        "content": (
+            f"<p>Producto(s) de interés: <b>{', '.join(etiquetas) or 'no especificado'}</b></p>"
+            f"<p>Página: {doc.pagina_origen or 'no registrada'}</p>"
+            f"<p>Solicitud: {doc.name}</p>"
+            "<p>No se creó oportunidad nueva porque esta ya está abierta. "
+            "Vale revisar si pide algo distinto a lo que ya se le está "
+            "atendiendo.</p>"
+        ),
+        "reference_doctype": doctype,
+        "reference_docname": name,
+    }).insert(ignore_permissions=True)
+
+    campo_dueno = "deal_owner" if doctype == "CRM Deal" else "lead_owner"
+    dueno = frappe.db.get_value(doctype, name, campo_dueno) or LEAD_OWNER_DEFAULT
+    tarea = frappe.get_doc({
+        "doctype": "CRM Task",
+        "title": f"Volvió a llenar el formulario: {doc.nombre or 'sin nombre'}",
+        "description": (
+            f"Producto(s): {', '.join(etiquetas) or 'no especificado'} · "
+            f"Página: {doc.pagina_origen or 'no registrada'} · Solicitud: {doc.name}"
+        ),
+        "status": "Backlog",
+        "priority": "High",
+        "assigned_to": dueno,
+        "reference_doctype": doctype,
+        "reference_docname": name,
+    })
+    tarea.insert(ignore_permissions=True)
+    return tarea.name
 
 
 def on_solicitud_insert(doc, method=None):
@@ -194,19 +309,32 @@ def on_solicitud_insert(doc, method=None):
     recupera — es justo el caso que el formulario de GHL no cubría, donde un
     fallo se veía como "no hubo leads"."""
     try:
-        existente_dt, existente = _buscar_existente(doc.telefono, doc.email)
-        if existente:
+        existente_dt, existente, abierto = _buscar_existente(doc.telefono, doc.email)
+        if existente and abierto:
             doc.db_set("procesado", 1, update_modified=False)
-            doc.db_set("error_proceso",
-                       f"Ya existía {existente_dt} {existente}; no se creó lead nuevo",
+            doc.db_set("nota_proceso",
+                       f"Vinculada a {existente_dt} {existente}, que ya está "
+                       "abierto; no se duplicó la oportunidad",
                        update_modified=False)
             if existente_dt == "CRM Lead":
                 doc.db_set("crm_lead", existente, update_modified=False)
+            _registrar_resolicitud(doc, existente_dt, existente)
         else:
-            lead, contacto = _crear_lead(doc)
+            # Sin match, o con match solo en registros CERRADOS: en ambos casos
+            # se crea el lead. Un prospecto perdido que vuelve a llenar el
+            # formulario es una oportunidad nueva, no un duplicado — así lo
+            # hacía el equipo a mano en GHL (56 teléfonos con un deal cerrado y
+            # uno abierto a la vez, medido el 2026-09-21).
+            cerrado = (existente_dt, existente) if existente else None
+            lead, contacto = _crear_lead(doc, cerrado=cerrado)
             doc.db_set("crm_lead", lead, update_modified=False)
             doc.db_set("crm_contacto", contacto, update_modified=False)
             doc.db_set("procesado", 1, update_modified=False)
+            if cerrado:
+                doc.db_set("nota_proceso",
+                           f"Ya había estado en el CRM ({cerrado[0]} {cerrado[1]}, "
+                           f"cerrado); se abrió oportunidad nueva",
+                           update_modified=False)
     except Exception as exc:
         frappe.log_error(f"captación {doc.name}: {exc}", "Solicitud Web")
         doc.db_set("error_proceso", str(exc)[:500], update_modified=False)
@@ -244,10 +372,13 @@ def _avisar_al_host(doc):
         "productos": _etiquetas(doc),
         "pagina": doc.pagina_origen,
         "lead": doc.crm_lead,
-        # Sin lead pero ya reconocido (tenía Deal abierto) NO es un fallo: es el
-        # caso bueno de no duplicar. El host solo debe alertar cuando la
-        # solicitud quedó realmente huérfana.
-        "vinculado_a": doc.error_proceso if doc.procesado and not doc.crm_lead else None,
+        # Sin lead pero ya reconocido (tenía oportunidad ABIERTA) NO es un fallo:
+        # es el caso bueno de no duplicar. El host no lo trata como avería, pero
+        # desde 2026-09-21 tampoco lo silencia — se avisa distinto, porque una
+        # re-solicitud de alguien a quien ya se le está atendiendo es
+        # información comercial, no ruido.
+        "vinculado_a": (frappe.db.get_value("Solicitud Web", doc.name, "nota_proceso")
+                        if doc.procesado and not doc.crm_lead else None),
         "utm_source": doc.utm_source,
         "gclid": doc.gclid,
     }
