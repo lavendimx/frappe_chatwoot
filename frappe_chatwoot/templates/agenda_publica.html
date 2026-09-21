@@ -32,9 +32,11 @@
   subdominio) y el pageview de GA4. Montar el contenedor completo traería además los
   listeners de clic y los tags del sitio, que aquí no aplican.
 
-  DEUDA CONOCIDA: la conversión se dispara desde este archivo y no desde GTM-M5WZ568, que
-  es donde el equipo la va a buscar. Es un puente para no perder conteo mientras se crea el
-  trigger propio en GTM; ver la tarea de Notion del 2026-09-13.
+  La conversión se dispara desde AQUÍ y NO desde GTM-M5WZ568 — decisión del 2026-09-21,
+  no es deuda. Esta página es código nuestro con deploy propio, así que el tag vive
+  versionado en git y no en la UI de GTM; montar el contenedor completo solo para esto
+  traería además los listeners de clic y los tags del sitio de WordPress, que aquí no
+  aplican. ⚠ Si alguien crea el tag también en GTM, la conversión se cuenta DOBLE.
 #}
 <script async src="https://www.googletagmanager.com/gtag/js?id=AW-905296272"></script>
 <script>
@@ -348,18 +350,25 @@
       }
 
       // Evento de conversión: el formulario de GHL vivía en un iframe de otro dominio y GA4
-      // nunca pudo ver un envío. Ahora sí.
+      // nunca pudo ver un envío. Ahora sí. Los tres perfiles empujan el evento — a GA4 sí le
+      // interesan las tres agendas, la restricción de abajo es solo para Ads.
       window.dataLayer = window.dataLayer || [];
       window.dataLayer.push({ event: 'generate_lead', form_name: 'agenda-' + PERFIL });
 
-      // Las dos señales que antes dependían del rebote a /gracias. El `send_to` es el mismo
-      // par id/label que dispara GTM allá (AW-905296272 / sq_kCJeZq-UYEJDz1q8D), así que el
-      // conteo en Ads queda idéntico a como estaba — ni se pierde ni se duplica, porque ya
-      // no hay rebote. Cuando exista la conversión propia de "videollamada agendada", este
-      // label se cambia por el nuevo y deja de mezclarse con el del formulario.
       if (typeof gtag === 'function') {
-        gtag('event', 'conversion', { send_to: 'AW-905296272/sq_kCJeZq-UYEJDz1q8D' });
         gtag('event', 'generate_lead', { form_name: 'agenda-' + PERFIL });
+
+        // Conversión de Ads: "Videollamada agendada (agenda propia)" (id 7785684163), propia
+        // de esta página desde el 2026-09-21. Antes reusaba el label del formulario de
+        // cotización (sq_kCJeZq-UYEJDz1q8D) porque era lo único que existía, y eso mezclaba
+        // las dos señales en un mismo número.
+        //
+        // Solo el perfil `leads` cuenta: es el único que es adquisición. `clientes` son
+        // cuentas ya firmadas y `entrevista` son candidatos a vacante — contarlos inflaría
+        // el conteo y ensuciaría la señal de Smart Bidding.
+        if (PERFIL === 'leads') {
+          gtag('event', 'conversion', { send_to: 'AW-905296272/NeZWCMO5wIAdEJDz1q8D' });
+        }
       }
 
       if (perfil.redirect_ok) {
