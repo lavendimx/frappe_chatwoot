@@ -262,6 +262,10 @@ def enviar(name):
     doc = frappe.get_doc("Newsletter", name)
     if doc.email_sent:
         frappe.throw(_("Esta campaña ya se envió"))
+    # Mismo motivo que en `campana_email.enviar_paso_ahora`: `send_emails()` termina en
+    # `self.save()`, y `has_permission()` del core mira `self.flags`, no el global que
+    # puso `_exigir_edicion()`. Sin esto, solo Administrator puede enviar.
+    doc.flags.ignore_permissions = True
     doc.send_emails()  # valida, encola a los pendientes y guarda
     frappe.db.commit()
     return {"ok": True, "destinatarios": doc.total_recipients, "name": doc.name}

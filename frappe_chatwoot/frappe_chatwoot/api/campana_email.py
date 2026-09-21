@@ -322,6 +322,13 @@ def enviar_paso_ahora(campana, nombre_paso):
     nl = frappe.get_doc("Newsletter", fila.newsletter)
     if nl.email_sent:
         frappe.throw(_("Este paso ya se envió"))
+    # `send_emails()` → `queue_all()` → `self.save()` → `check_permission("write")`, y
+    # `Document.has_permission()` del core mira `self.flags`, NO el global
+    # `frappe.flags.ignore_permissions` que pone `_exigir_edicion()`. Sin esta línea, un
+    # Sales Manager con permiso de sobra (Valente, Zaira) recibe 403 y solo Administrator
+    # puede disparar un paso — pasó de verdad con el email 1 de COPARMEX (2026-09-18).
+    # La frontera de seguridad es `_exigir_edicion()`, que ya corrió arriba.
+    nl.flags.ignore_permissions = True
     nl.send_emails()
     frappe.db.commit()
     return {"ok": True, "destinatarios": nl.total_recipients}
