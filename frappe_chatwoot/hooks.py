@@ -184,6 +184,14 @@ after_request = [
     "frappe_chatwoot.frappe_chatwoot.api.formularios.csp_embebido",
 ]
 
+# Guard: /app (Frappe Desk) redirige a /crm salvo System Manager. Ver el
+# docstring de utils/erp_guard.py para el porque (nadie usa el Desk, los 5
+# usuarios son System User, tematizar el Desk se revierte con bench update).
+# Administrator exceptuado dentro de la funcion, como llave de rescate.
+before_request = [
+    "frappe_chatwoot.utils.erp_guard.antes_de_la_peticion",
+]
+
 # ---------------------------------------------------------------------------
 # Fixtures — la configuracion que vive en la DB y que debe viajar a cada sitio
 # ---------------------------------------------------------------------------
