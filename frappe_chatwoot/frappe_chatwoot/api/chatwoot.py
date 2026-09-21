@@ -520,18 +520,53 @@ def list_inboxes() -> list[dict]:
     ]
 
 
-def _shape_conversation(conv: dict) -> dict:
+# Tope del barrido de la bandeja (ver get_conversations). Chatwoot pagina de 25
+# en 25; 10 páginas = 250 conversaciones. Es un backstop contra una cuenta que
+# crezca sin que nadie lo note, no un límite de producto: hoy el inbox más
+# grande (lavendi.mx) son 91 conversaciones = 4 páginas.
+MAX_PAGINAS_BANDEJA = 10
+
+
+def _es_grupo(sender: dict) -> bool:
+    """Un grupo de WhatsApp se reconoce por el JID que Evolution API guarda en el
+    `identifier` del contacto de Chatwoot: los grupos terminan en `@g.us`, los
+    individuales en `@s.whatsapp.net` (o vienen vacíos si el contacto se creó a
+    mano desde la UI, que también es individual).
+
+    Se usa el identifier y no el nombre — varios grupos traen "(GROUP)" en el
+    nombre, pero eso lo escribe Evolution al crearlos y cualquiera puede
+    renombrarlos desde Chatwoot; el JID no cambia nunca."""
+    return (sender.get("identifier") or "").endswith("@g.us")
+
+
+def _shape_conversation(conv: dict, pausadas: set = None, archivadas: set = None) -> dict:
     """Aplana el objeto de Chatwoot a lo que la bandeja necesita pintar.
 
     El preview sale de `last_non_activity_message`, que _scrub_conversation_preview
     ya dejó en None si era una nota privada — por eso aquí se lee sin volver a
-    filtrar: la invariante de confidencialidad ya se aplicó aguas arriba."""
+    filtrar: la invariante de confidencialidad ya se aplicó aguas arriba.
+
+    `pausadas`/`archivadas` son conjuntos de conversation_id precargados de una
+    sola consulta por quien llama en lote. Sin eso esto haría dos SELECT por
+    conversación y el barrido completo de la bandeja (ver get_conversations)
+    dispararía ~180 consultas por carga."""
     meta = conv.get("meta") or {}
     sender = meta.get("sender") or {}
     last = conv.get("last_non_activity_message") or {}
     assignee = meta.get("assignee") or {}
+    cid = conv.get("id")
+    paused = (
+        cid in pausadas
+        if pausadas is not None
+        else bool(frappe.db.exists("Chatwoot Pausa", {"conversation_id": cid}))
+    )
+    archived = (
+        cid in archivadas
+        if archivadas is not None
+        else bool(frappe.db.exists("Chatwoot Archivo", {"conversation_id": cid}))
+    )
     return {
-        "id": conv.get("id"),
+        "id": cid,
         "inbox_id": conv.get("inbox_id"),
         "status": conv.get("status"),
         "unread_count": conv.get("unread_count") or 0,
@@ -548,31 +583,130 @@ def _shape_conversation(conv: dict) -> dict:
         # lavendi.mx: si el agente IA está pausado en esta conversación (ver
         # frappe_chatwoot.api.agentes) — la bandeja lo marca para que quede
         # claro quién está respondiendo antes de escribir encima.
-        "agent_paused": bool(frappe.db.exists("Chatwoot Pausa", {"conversation_id": conv.get("id")})),
+        "agent_paused": paused,
+        # lavendi.mx: conversación archivada por el equipo — sale de la bandeja
+        # principal sin borrarse ni tocar su estado en Chatwoot (ver archivar()).
+        "archived": archived,
+        # lavendi.mx: grupo de WhatsApp. La bandeja los pinta en una sección
+        # aparte, debajo de las conversaciones individuales.
+        "is_group": _es_grupo(sender),
     }
 
 
+def _ids_marcados(doctype: str) -> set:
+    """conversation_id marcados en un doctype de banderas (Chatwoot Pausa /
+    Chatwoot Archivo), en una sola consulta. Ver _shape_conversation."""
+    try:
+        return set(frappe.get_all(doctype, pluck="conversation_id"))
+    except Exception:
+        # Un doctype que todavía no existe (instalación a medio migrar) no debe
+        # tumbar la bandeja — degrada a "nada marcado", mismo criterio que el
+        # resto de este módulo.
+        return set()
+
+
 @frappe.whitelist()
-def get_conversations(inbox_id=None, status: str = "open", page=1) -> list[dict]:
+def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas=0) -> list[dict]:
     """Bandeja completa. Degrada suave (lista vacía) si Chatwoot no está
-    configurado, mismo contrato que get_conversations_for_contact."""
+    configurado, mismo contrato que get_conversations_for_contact.
+
+    Barre TODAS las páginas de Chatwoot, no solo la primera. Antes devolvía la
+    página 1 (25 conversaciones) y eso dejaba fuera de la bandeja la mayor parte
+    del canal: medido el 2026-09-21 en lavendi.mx, de 91 conversaciones se veían
+    25, y de los 9 grupos de WhatsApp solo 1 — los otros 8 vivían en las páginas
+    3 y 4, invisibles. Con la lista partida en individuales y grupos eso dejaba
+    la sección de grupos prácticamente vacía sin que nada lo indicara.
+
+    Costo medido del barrido: 0.68 s contra 0.21 s de una sola página (5
+    peticiones a Chatwoot en vez de 1). Crece con el tamaño del canal, por eso
+    el tope de MAX_PAGINAS_BANDEJA, que se registra en el log cuando muerde en
+    vez de truncar en silencio.
+
+    `page` se conserva en la firma porque el frontend viejo lo mandaba; ya no se
+    usa — pedir una página suelta es justo lo que causaba el problema.
+    """
     validate_role()
     if not is_chatwoot_enabled():
         return []
     if status not in ("open", "resolved", "pending", "snoozed", "all"):
         frappe.throw("status inválido")
-    conversations = cw.list_conversations(
-        # Aislamiento entre clientes: sin canal explicito se usa el canal de ESTE
-        # sitio, nunca 'todos'. Antes devolvia None y Chatwoot entregaba las
-        # conversaciones de todos los inboxes de la cuenta compartida (Six Gardens
-        # aparecia en la bandeja de lavendi.mx). Ver docs/project_agente_whatsapp.md.
-        inbox_id=frappe.utils.cint(inbox_id) or _default_inbox_id(),
-        status=status,
-        page=frappe.utils.cint(page) or 1,
-    )
-    shaped = [_shape_conversation(c) for c in conversations]
+    # Aislamiento entre clientes: sin canal explicito se usa el canal de ESTE
+    # sitio, nunca 'todos'. Antes devolvia None y Chatwoot entregaba las
+    # conversaciones de todos los inboxes de la cuenta compartida (Six Gardens
+    # aparecia en la bandeja de lavendi.mx). Ver docs/project_agente_whatsapp.md.
+    canal = frappe.utils.cint(inbox_id) or _default_inbox_id()
+
+    conversations = []
+    for pagina in range(1, MAX_PAGINAS_BANDEJA + 1):
+        lote = cw.list_conversations(inbox_id=canal, status=status, page=pagina)
+        if not lote:
+            break
+        conversations.extend(lote)
+    else:
+        frappe.log_error(
+            title="Bandeja truncada: se alcanzó el tope de páginas",
+            message=(
+                f"canal={canal} status={status}: se leyeron {MAX_PAGINAS_BANDEJA} páginas "
+                f"({len(conversations)} conversaciones) y Chatwoot seguía devolviendo más. "
+                "Subir MAX_PAGINAS_BANDEJA o paginar la bandeja de verdad."
+            ),
+        )
+
+    pausadas = _ids_marcados("Chatwoot Pausa")
+    archivadas_ids = _ids_marcados("Chatwoot Archivo")
+    shaped = [_shape_conversation(c, pausadas, archivadas_ids) for c in conversations]
+    # El archivado es una vista, no un borrado: o se ven solo las archivadas o
+    # solo las vivas, nunca mezcladas — que es justo lo que se pidió evitar.
+    quiere_archivadas = bool(frappe.utils.cint(archivadas))
+    shaped = [c for c in shaped if c["archived"] == quiere_archivadas]
     shaped.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
     return shaped
+
+
+@frappe.whitelist()
+def archivar(conversation_id: int, inbox_id=None) -> dict:
+    """Saca una conversación de la bandeja principal sin borrarla.
+
+    Es una bandera propia del CRM, NO el estado de Chatwoot. A propósito:
+    `resolved` ya se usa para "este asunto se cerró" y la bandeja abre en
+    "Todas", así que resolver no saca nada de la vista; y tocar el estado de
+    Chatwoot cambiaría lo que ve el agente IA y lo que reportan las métricas del
+    canal. Archivar es sobre la bandeja, no sobre la conversación.
+
+    Global para el equipo, no por usuario — mismo criterio que Chatwoot Pausa:
+    la bandeja es compartida y "ya no estorba" es una afirmación sobre el
+    negocio, no sobre quién la miró. Se registra quién archivó y cuándo para que
+    haya a quién preguntar.
+
+    Reversible con desarchivar(). Idempotente: archivar dos veces no duplica.
+    """
+    validate_role()
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        frappe.throw("conversation_id inválido")
+    if frappe.db.exists("Chatwoot Archivo", {"conversation_id": cid}):
+        return {"archived": True}
+    frappe.get_doc(
+        {
+            "doctype": "Chatwoot Archivo",
+            "conversation_id": cid,
+            "inbox_id": str(inbox_id) if inbox_id else None,
+            "archivado_por": frappe.session.user,
+            "archivado_at": frappe.utils.now_datetime(),
+        }
+    ).insert(ignore_permissions=True)
+    return {"archived": True}
+
+
+@frappe.whitelist()
+def desarchivar(conversation_id: int) -> dict:
+    """Devuelve la conversación a la bandeja principal. Espejo de archivar()."""
+    validate_role()
+    cid = frappe.utils.cint(conversation_id)
+    name = frappe.db.exists("Chatwoot Archivo", {"conversation_id": cid})
+    if name:
+        frappe.delete_doc("Chatwoot Archivo", name, ignore_permissions=True)
+    return {"archived": False}
 
 
 @frappe.whitelist()
@@ -609,6 +743,8 @@ def search_conversations(q: str = "", limit=40) -> list[dict]:
         # concluir que la conversación no existe.
         frappe.throw("No se pudo buscar en Chatwoot")
 
+    pausadas = _ids_marcados("Chatwoot Pausa")
+    archivadas = _ids_marcados("Chatwoot Archivo")
     vistas = set()
     filas = []
     for contacto in contactos:
@@ -621,7 +757,10 @@ def search_conversations(q: str = "", limit=40) -> list[dict]:
             if not cid or cid in vistas:
                 continue
             vistas.add(cid)
-            filas.append(_shape_conversation(conv))
+            # El buscador SÍ devuelve archivadas (marcadas como tales): ya ignora
+            # el filtro de estado y canal por el mismo motivo — "no aparece" se
+            # lee como "no existe" y manda a la gente a buscar fuera del CRM.
+            filas.append(_shape_conversation(conv, pausadas, archivadas))
 
     # El buscador ignora a proposito el filtro de estado/canal de la vista, pero NO
     # debe cruzar de cliente: se limita al inbox de este sitio (mismo criterio que
