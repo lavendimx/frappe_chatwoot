@@ -116,6 +116,10 @@ doc_events = {
         "before_insert": "frappe_chatwoot.utils.kb_isolation.set_inbox_from_user_permission",
     },
     "CRM Deal": {
+        # `ghl_status` es una proyección de `status`, no un campo que se mantenga
+        # a mano: sin esto diverge sola cada vez que alguien mueve una
+        # oportunidad a Ganada/Perdida desde la UI. Ver utils/estatus_deal.py.
+        "validate": "frappe_chatwoot.utils.estatus_deal.sincronizar",
         "on_update": [
             "frappe_chatwoot.utils.onboarding.on_deal_update",
             "frappe_chatwoot.utils.nutricion.on_deal_update",
