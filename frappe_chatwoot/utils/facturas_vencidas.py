@@ -44,24 +44,47 @@ def avisar_vencidas():
         fields=["name", "customer", "outstanding_amount", "due_date"],
     )
 
-    avisadas, ya_avisadas = [], []
-    for f in vencidas:
-        cache_key = _CACHE_PREFIX + f.name
-        if frappe.cache().get_value(cache_key):
-            ya_avisadas.append(f.name)
-            continue
-        try:
-            monto = frappe.utils.fmt_money(f.outstanding_amount, currency="MXN")
-            push.notify_roles(
-                ROLES,
-                title="Factura vencida",
-                body=f"{f.customer} debe {monto} desde {f.due_date}",
-                url="/crm/facturacion",
-                tag=f"factura-{f.name}",
-            )
-            frappe.cache().set_value(cache_key, "1", expires_in_sec=_TTL_SEGUNDOS)
-            avisadas.append(f.name)
-        except Exception as exc:
-            frappe.log_error(f"factura vencida {f.name}: {exc}", "Facturas vencidas (push)")
+    # Un aviso por factura sería una avalancha: al escribir esto hay 11 vencidas,
+    # o sea 11 notificaciones seguidas a las 8 de la mañana — el patrón que vuelve
+    # ignorable el canal (misma razón por la que el push de conversaciones avisa
+    # una sola vez por hilo, bitácora 2026-09-05). Se manda UN aviso agregado y el
+    # detalle se ve en /crm/facturacion, que ya existe.
+    nuevas = [f for f in vencidas if not frappe.cache().get_value(_CACHE_PREFIX + f.name)]
+    ya_avisadas = [f.name for f in vencidas if f not in nuevas]
 
-    return {"activo": True, "avisadas": avisadas, "ya_avisadas_hoy": ya_avisadas}
+    if not nuevas:
+        return {"activo": True, "avisadas": [], "ya_avisadas_hoy": ya_avisadas}
+
+    total = frappe.utils.fmt_money(
+        sum(f.outstanding_amount or 0 for f in vencidas), currency="MXN"
+    )
+    if len(vencidas) == 1:
+        f = vencidas[0]
+        monto = frappe.utils.fmt_money(f.outstanding_amount, currency="MXN")
+        cuerpo = f"{f.customer} debe {monto} desde {f.due_date}"
+    else:
+        cuerpo = f"{len(vencidas)} facturas vencidas · {total} por cobrar"
+
+    try:
+        push.notify_roles(
+            ROLES,
+            title="Cobranza vencida",
+            body=cuerpo,
+            url="/crm/facturacion",
+            # tag fijo: un aviso nuevo reemplaza al anterior en la pantalla en vez
+            # de apilarse día tras día.
+            tag="facturas-vencidas",
+        )
+    except Exception as exc:
+        frappe.log_error(f"aviso de cobranza vencida: {exc}", "Facturas vencidas (push)")
+        return {"activo": True, "avisadas": [], "error": str(exc)}
+
+    for f in nuevas:
+        frappe.cache().set_value(_CACHE_PREFIX + f.name, "1", expires_in_sec=_TTL_SEGUNDOS)
+
+    return {
+        "activo": True,
+        "avisadas": [f.name for f in nuevas],
+        "ya_avisadas_hoy": ya_avisadas,
+        "total_vencido": total,
+    }
