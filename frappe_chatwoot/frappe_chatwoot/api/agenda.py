@@ -76,6 +76,18 @@ def _pedir(ruta: str, payload: dict) -> dict:
         frappe.throw(f"El servicio de agenda no responde: {exc}")
 
 
+def _pedir_opcional(ruta: str, payload: dict) -> dict | None:
+    """Como `_pedir`, pero para enriquecer con datos NO esenciales: una falla aquí no debe
+    tronar el diálogo de alta manual, solo dejarlo en su comportamiento de siempre (sin
+    selector de asesora). Usado por `opciones_agenda` para traer los calendarios de la
+    Pieza F (agenda nativa multi-asesora, `planes/scope-agenda-nativa-frappe.md`)."""
+    try:
+        return _pedir(ruta, payload)
+    except Exception as exc:  # noqa: BLE001 — best-effort a propósito, ver docstring
+        frappe.log_error(title="agenda: no se pudo listar calendarios (no bloqueante)", message=f"{ruta} -> {exc}")
+        return None
+
+
 @frappe.whitelist()
 def opciones_agenda() -> dict:
     """Lo que el diálogo necesita para armarse: en qué inboxes se puede agendar y a quién
@@ -100,6 +112,19 @@ def opciones_agenda() -> dict:
     for fila in inboxes:
         fila["citas"] = frappe.utils.cint(conteos.get(fila["inbox_id"], 0))
     inboxes.sort(key=lambda f: (-f["citas"], f["inbox_id"]))
+
+    # Pieza F (2026-09-21): calendarios/asesoras declarados en `AGENDA_CITAS` para cada
+    # inbox — viven en el `.env` del proceso `agente-ia` (Node), no en Frappe. Se reusa el
+    # MISMO endpoint de alta (`/calendario/agendar`) con `modo: "listar_calendarios"` en vez
+    # de sumar una ruta GET: `agente-ia/server.js` no se toca (tiene cambios sin commitear
+    # de otro trabajo en curso) y el contrato sigue siendo "un POST, un resultado" — ver
+    # `agente-ia/lib/agenda-manual.js`. Best-effort con `_pedir_opcional`: si agente-ia no
+    # responde, o el inbox no tiene `AGENDA_CITAS` declarado (el caso de HOY para los 4
+    # inboxes existentes), `calendarios` queda `[]` y el diálogo no dibuja el selector — el
+    # comportamiento de siempre.
+    for fila in inboxes:
+        opciones = _pedir_opcional("/calendario/agendar", {"modo": "listar_calendarios", "inbox_id": fila["inbox_id"]})
+        fila["calendarios"] = (opciones or {}).get("calendarios") or []
 
     # Anfitriones: el equipo interno. Se filtra por dominio y no por rol a propósito —
     # los roles de ventas quedaron dispares tras la migración de GHL (a alejandro@ hubo que
@@ -160,12 +185,19 @@ def crear_cita(
     empresa: str = None,
     anfitriones: str = None,
     contacto: str = None,
+    asesora: str = None,
 ) -> dict:
-    """Crea el evento real en Google Calendar (con Meet) y su registro en el CRM.
+    """Crea la cita real (Google Calendar con Meet, o nativa en Frappe según la fuente del
+    inbox — Pieza F) y su registro en el CRM.
 
     `anfitriones` llega como JSON desde el front. Se agregan como invitados para que la
     cita caiga también en el calendario personal de quien la va a atender: el calendario
     de Sofía lo mira el equipo de vez en cuando, el propio lo miran todos los días.
+
+    `asesora`: override manual del selector de la Pieza F (agenda nativa multi-asesora).
+    Solo tiene efecto si el inbox declara `AGENDA_CITAS` en `agente-ia` — sin eso,
+    `agenda-manual.js` la ignora y agenda en el único calendario de siempre. Con
+    `AGENDA_CITAS` declarado pero SIN `asesora`, el reparto es automático (menor carga).
     """
     validate_role()
 
@@ -189,6 +221,7 @@ def crear_cita(
             "empresa": (empresa or "").strip(),
             "anfitriones": anfitriones,
             "contacto": contacto or "",
+            **({"asesora": asesora} if asesora else {}),
         },
     )
     if not resultado.get("ok"):
