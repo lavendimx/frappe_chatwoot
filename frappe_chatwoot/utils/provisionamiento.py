@@ -24,11 +24,20 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    se genera aqui (una key nueva romperia al agente que ya la tiene en su .env) —
    eso lo hace a mano `asegurar_usuario_servicio()`.
 
+5. **VAPID del push propio**: `Sofia Push Settings` es un Single — nace vacio en
+   cada sitio nuevo (confirmado en sixgardens.lavendi.mx, 2026-09-21). Sin llaves,
+   `get_vapid_public_key()` devuelve "" y el botón de activar push del cliente
+   nunca aparece suscribible. Las llaves son POR SITIO a propósito (no se copia
+   el par de crm.lavendi.mx): si dos sitios compartieran la misma llave privada,
+   una suscripción de un dispositivo podria, en teoria, validarse contra el
+   backend equivocado. Se generan una sola vez, aqui, si el campo esta vacio.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
 """
 
+import base64
 import json
 import os
 import shutil
@@ -36,6 +45,7 @@ import shutil
 import frappe
 
 USUARIO_SERVICIO = "agente-ia@lavendi.mx"
+VAPID_SUBJECT_DEFAULT = "mailto:contacto@lavendi.mx"
 
 # Marca de la plataforma (mismos valores que crm.lavendi.mx). `splash_image` es la
 # pantalla post-login; `favicon` la pestana; `app_logo` el logo del login/menu.
@@ -112,6 +122,7 @@ def ajustar_sitio():
         _quick_filters_deal,
         _vistas_por_defecto,
         _usuario_servicio_agente,
+        _vapid_push,
     ):
         try:
             paso()
@@ -312,6 +323,52 @@ def _usuario_servicio_agente():
         }
     )
     doc.insert(ignore_permissions=True)
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _vapid_push():
+    """Genera el par de llaves VAPID de este sitio si `Sofia Push Settings`
+    sigue vacio. Ver el punto 5 del docstring del modulo.
+
+    Formato: privada en "raw" (el escalar de 32 bytes, b64url sin padding) y
+    publica en punto EC sin comprimir (0x04 + x + y, 65 bytes, b64url) — el
+    mismo formato que `applicationServerKey` de la Push API del navegador.
+    `Vapid01.from_string()` detecta "raw" por longitud (32 bytes tras decodificar)
+    sin necesitar encabezados PEM; es la variante que costo diagnosticar el
+    2026-09-20 en crm.lavendi.mx (la privada se habia guardado como PEM completo
+    y pywebpush tronaba con `ValueError: Could not deserialize key data`). Se
+    verifica el roundtrip contra `from_string()` antes de guardar, para no repetir
+    ese incidente en un sitio nuevo.
+    """
+    settings = frappe.get_single("Sofia Push Settings")
+    if settings.vapid_public_key:
+        return
+    from py_vapid import Vapid01 as Vapid
+
+    vapid = Vapid()
+    vapid.generate_keys()
+    priv_numbers = vapid.private_key.private_numbers()
+    pub_numbers = vapid.public_key.public_numbers()
+    private_raw = priv_numbers.private_value.to_bytes(32, "big")
+    public_raw = b"\x04" + pub_numbers.x.to_bytes(32, "big") + pub_numbers.y.to_bytes(32, "big")
+    private_b64 = _b64url(private_raw)
+    public_b64 = _b64url(public_raw)
+
+    # Roundtrip: si esto no coincide, mejor no guardar nada (el push quedaria
+    # configurado con una llave que webpush() no puede leer, y el sintoma seria
+    # un fallo silencioso en cada envio, no un error visible aqui).
+    comprobar = Vapid.from_string(private_b64)
+    if comprobar.private_key.private_numbers().private_value != priv_numbers.private_value:
+        frappe.log_error("VAPID: el roundtrip de la llave generada no coincide", "provisionamiento")
+        return
+
+    settings.vapid_public_key = public_b64
+    settings.vapid_private_key = private_b64
+    settings.vapid_subject = VAPID_SUBJECT_DEFAULT
+    settings.save(ignore_permissions=True)
 
 
 def asegurar_usuario_servicio():
