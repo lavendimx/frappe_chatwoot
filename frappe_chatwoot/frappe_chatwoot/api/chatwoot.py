@@ -706,16 +706,13 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
     # solo las vivas, nunca mezcladas — que es justo lo que se pidió evitar.
     quiere_archivadas = bool(frappe.utils.cint(archivadas))
     shaped = [c for c in shaped if c["archived"] == quiere_archivadas]
-    # Orden nativo de GHL (Alejandro, 2026-09-22): primero las conversaciones que
-    # esperan respuesta (el último mensaje es del cliente), y dentro de cada bloque
-    # por actividad reciente. Así el equipo ve arriba lo no contestado y las que ya
-    # se atendieron bajan solas al responder. Se hace en el backend para que valga
-    # en TODAS las vistas (individuales, grupos y archivadas), sin depender de que
-    # cada pantalla lo reordene.
-    shaped.sort(
-        key=lambda c: (c.get("preview_direction") == "incoming", c.get("last_activity_at") or 0),
-        reverse=True,
-    )
+    # Orden por recencia pura (Alejandro, 2026-09-22, corrección del mismo día):
+    # lo más reciente arriba, lo más antiguo abajo. Se había probado antes
+    # "no contestados primero", pero eso dejaba hilos recién contestados (17:12)
+    # por debajo de pendientes viejos (09-08). El badge de no leídos sigue marcando
+    # lo pendiente sin tocar el orden. Va en el backend para que valga en TODAS las
+    # vistas (individuales, grupos y archivadas), sin depender de cada pantalla.
+    shaped.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
     return shaped
 
 
