@@ -195,35 +195,100 @@ def _asegurar_contacto(doc):
     return contacto.name
 
 
-def _crear_lead(doc, cerrado=None):
+def _crear_ficha(contacto, *, nombre="", email="", telefono="", source="Formulario web",
+                 valor=None, organization_name=None, atribucion=None,
+                 first_name=None, last_name=None):
+    """Inserta la ficha del embudo y devuelve `(doctype, name)`.
+
+    Crea **`CRM Deal`** (etapa `Lead`) cuando hay contacto, que es el caso
+    normal. Cae a **`CRM Lead`** solo cuando no lo hay: `CRM Deal` deriva
+    `mobile_no`, `email` y `deal_name` del contacto primario
+    (`set_primary_email_mobile_no` / `set_deal_name` en `crm_deal.py`), así que
+    un Deal sin contacto nace sin teléfono y sin nombre visible — inservible
+    para localizar al prospecto. `CRM Lead` sí tiene campos propios y sobrevive
+    sin contacto.
+
+    Existe desde el 2026-09-22 (Bloque 2, "Solo Oportunidades"): antes cada
+    productor creaba un `CRM Lead` que había que convertir a mano para entrar al
+    embudo y a las secuencias — de ahí los 603 leads acumulados y los prospectos
+    sin oportunidad (caso Jorge Fonk).
+    """
+    atribucion = atribucion or {}
+    if first_name is not None:
+        completo = " ".join(x for x in (first_name, last_name) if x).strip()
+    else:
+        completo = (nombre or "").strip()
+        partes = completo.split(" ", 1)
+        first_name = partes[0] if partes else ""
+        last_name = partes[1] if len(partes) > 1 else ""
+
+    campos = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "lead_name": completo,
+        "email": (email or "").strip() or None,
+        "mobile_no": (telefono or "").strip() or None,
+        "source": source,
+    }
+    for campo, valor_campo in (("utm_source", atribucion.get("utm_source")),
+                               ("utm_campaign", atribucion.get("utm_campaign")),
+                               ("utm_term", atribucion.get("utm_term")),
+                               ("gclid_ads", atribucion.get("gclid"))):
+        if valor_campo:
+            campos[campo] = valor_campo
+
+    if contacto:
+        campos.update({
+            "doctype": "CRM Deal",
+            "contact": contacto,
+            "contacts": [{"contact": contacto, "is_primary": 1}],
+            "status": "Lead",
+            "deal_owner": LEAD_OWNER_DEFAULT,
+            # El título de la oportunidad es la persona, no la empresa: sin este
+            # `deal_name` explícito, `set_deal_name()` prefiere `organization_name`
+            # y la lista mostraría el nombre de la empresa en vez del prospecto.
+            "deal_name": completo,
+        })
+        if valor:
+            campos["deal_value"] = valor
+        if organization_name:
+            # En Deal `organization` es un Link a `CRM Organization`; el nombre
+            # suelto que trae una reserva o un formulario va en el campo de texto
+            # `organization_name` para no inventar una organización.
+            campos["organization_name"] = organization_name
+        ficha = frappe.get_doc(campos)
+        ficha.insert(ignore_permissions=True)
+        return "CRM Deal", ficha.name
+
+    campos.update({
+        "doctype": "CRM Lead",
+        "contact": None,
+        "status": "New",
+        "lead_owner": LEAD_OWNER_DEFAULT,
+    })
+    if organization_name:
+        campos["organization"] = organization_name
+    ficha = frappe.get_doc(campos)
+    ficha.insert(ignore_permissions=True)
+    return "CRM Lead", ficha.name
+
+
+def _crear_oportunidad(doc, cerrado=None):
     etiquetas = _etiquetas(doc)
     valor = max([PRODUCTOS[k]["valor"] for k in _productos_de(doc)] or [0])
     contacto = _asegurar_contacto(doc)
-    lead = frappe.get_doc({
-        "doctype": "CRM Lead",
-        "first_name": doc.nombre,
-        "lead_name": doc.nombre,
-        "status": "New",
-        "lead_owner": LEAD_OWNER_DEFAULT,
-        "email": doc.email,
-        "mobile_no": doc.telefono,
-        "contact": contacto,
-        "source": "Formulario web",
-        # Campos de trazabilidad que existen desde la migración de GHL.
-        "ghl_source": "Formulario web",
-    })
-    if valor:
-        lead.deal_value = valor
-    for campo, valor_campo in (("utm_source", doc.utm_source),
-                               ("utm_campaign", doc.utm_campaign),
-                               ("utm_term", doc.utm_term),
-                               ("gclid_ads", doc.gclid)):
-        if valor_campo and hasattr(lead, campo):
-            setattr(lead, campo, valor_campo)
-    lead.insert(ignore_permissions=True)
+    ficha_dt, ficha = _crear_ficha(
+        contacto,
+        nombre=doc.nombre,
+        email=doc.email,
+        telefono=doc.telefono,
+        valor=valor,
+        atribucion={"utm_source": doc.utm_source, "utm_campaign": doc.utm_campaign,
+                    "utm_term": doc.utm_term, "gclid": doc.gclid},
+    )
 
     # Referencia cruzada cuando el prospecto ya había pasado por aquí y su único
-    # registro estaba cerrado. Sin esto el lead nuevo parece un contacto virgen
+    # registro estaba cerrado. Sin esto la ficha nueva parece un contacto virgen
     # y se pierde todo el historial de la vez anterior.
     historial = ""
     if cerrado and cerrado[0]:
@@ -235,7 +300,7 @@ def _crear_lead(doc, cerrado=None):
             "title": "El prospecto volvió a solicitar por el formulario",
             "content": (
                 f"<p>Nueva solicitud <b>{doc.name}</b> el {frappe.utils.now()}.</p>"
-                f"<p>Se abrió <b>CRM Lead {lead.name}</b>; este registro se deja "
+                f"<p>Se abrió <b>{ficha_dt} {ficha}</b>; este registro se deja "
                 "como está.</p>"
                 f"<p>Producto(s) de interés: {', '.join(etiquetas) or 'no especificado'}</p>"
             ),
@@ -253,10 +318,10 @@ def _crear_lead(doc, cerrado=None):
                 f"<p>Solicitud: {doc.name}</p>"
                 f"{historial}"
             ),
-            "reference_doctype": "CRM Lead",
-            "reference_docname": lead.name,
+            "reference_doctype": ficha_dt,
+            "reference_docname": ficha,
         }).insert(ignore_permissions=True)
-    return lead.name, contacto
+    return ficha_dt, ficha, contacto
 
 
 def _registrar_resolicitud(doc, doctype, name):
@@ -304,8 +369,8 @@ def _registrar_resolicitud(doc, doctype, name):
 
 
 def on_solicitud_insert(doc, method=None):
-    """Convierte la solicitud en Contacto + Lead. Nunca lanza: si algo falla,
-    la solicitud queda en la bandeja con el error escrito y un humano la
+    """Convierte la solicitud en Contacto + Oportunidad. Nunca lanza: si algo
+    falla, la solicitud queda en la bandeja con el error escrito y un humano la
     recupera — es justo el caso que el formulario de GHL no cubría, donde un
     fallo se veía como "no hubo leads"."""
     try:
@@ -318,16 +383,19 @@ def on_solicitud_insert(doc, method=None):
                        update_modified=False)
             if existente_dt == "CRM Lead":
                 doc.db_set("crm_lead", existente, update_modified=False)
+            elif existente_dt == "CRM Deal":
+                doc.db_set("crm_deal", existente, update_modified=False)
             _registrar_resolicitud(doc, existente_dt, existente)
         else:
             # Sin match, o con match solo en registros CERRADOS: en ambos casos
-            # se crea el lead. Un prospecto perdido que vuelve a llenar el
+            # se crea la ficha. Un prospecto perdido que vuelve a llenar el
             # formulario es una oportunidad nueva, no un duplicado — así lo
             # hacía el equipo a mano en GHL (56 teléfonos con un deal cerrado y
             # uno abierto a la vez, medido el 2026-09-21).
             cerrado = (existente_dt, existente) if existente else None
-            lead, contacto = _crear_lead(doc, cerrado=cerrado)
-            doc.db_set("crm_lead", lead, update_modified=False)
+            ficha_dt, ficha, contacto = _crear_oportunidad(doc, cerrado=cerrado)
+            doc.db_set("crm_deal" if ficha_dt == "CRM Deal" else "crm_lead",
+                       ficha, update_modified=False)
             doc.db_set("crm_contacto", contacto, update_modified=False)
             doc.db_set("procesado", 1, update_modified=False)
             if cerrado:
@@ -371,14 +439,17 @@ def _avisar_al_host(doc):
         "telefono": doc.telefono,
         "productos": _etiquetas(doc),
         "pagina": doc.pagina_origen,
+        # `lead` se conserva por compatibilidad con el host; desde 2026-09-22 la
+        # ficha normal es `deal` y `lead` solo se llena en el fallback sin contacto.
         "lead": doc.crm_lead,
-        # Sin lead pero ya reconocido (tenía oportunidad ABIERTA) NO es un fallo:
+        "deal": doc.crm_deal,
+        # Sin ficha pero ya reconocido (tenía oportunidad ABIERTA) NO es un fallo:
         # es el caso bueno de no duplicar. El host no lo trata como avería, pero
         # desde 2026-09-21 tampoco lo silencia — se avisa distinto, porque una
         # re-solicitud de alguien a quien ya se le está atendiendo es
         # información comercial, no ruido.
         "vinculado_a": (frappe.db.get_value("Solicitud Web", doc.name, "nota_proceso")
-                        if doc.procesado and not doc.crm_lead else None),
+                        if doc.procesado and not (doc.crm_lead or doc.crm_deal) else None),
         "utm_source": doc.utm_source,
         "gclid": doc.gclid,
     }
@@ -466,9 +537,13 @@ def _enviar_bienvenida(doc):
                               content_attributes=autoria.marca_automatica(
                                   "bienvenida", "Bienvenida del formulario web — producto"))
 
-    if doc.crm_lead and frappe.db.exists("CRM Lead", doc.crm_lead):
-        frappe.db.set_value("CRM Lead", doc.crm_lead,
-                            "chatwoot_conversation_id", str(conversation_id),
-                            update_modified=False)
+    # La liga al hilo de bienvenida se escribe en la ficha (Deal normal, Lead en
+    # el fallback sin contacto). Es la marca que impide que `agente-ia` abra una
+    # oportunidad duplicada cuando el prospecto conteste por primera vez.
+    for doctype, name in (("CRM Deal", doc.crm_deal), ("CRM Lead", doc.crm_lead)):
+        if name and frappe.db.exists(doctype, name):
+            frappe.db.set_value(doctype, name,
+                                "chatwoot_conversation_id", str(conversation_id),
+                                update_modified=False)
     doc.db_set("chatwoot_conversation_id", str(conversation_id),
                update_modified=False)

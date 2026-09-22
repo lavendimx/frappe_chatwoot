@@ -199,12 +199,13 @@ def _enganchar_crm(perfil: str, resultado: dict, atribucion: dict) -> dict:
 
     contacto = _asegurar_contacto(portador)
 
-    lead = None
+    ficha = None
+    ficha_dt = None
     if perfil == "leads" and not name_existente:
         try:
-            lead = _crear_lead_agenda(portador, contacto, datos, atribucion, resultado)
+            ficha_dt, ficha = _crear_oportunidad_agenda(portador, contacto, datos, atribucion, resultado)
         except Exception:
-            frappe.log_error(frappe.get_traceback(), "agenda-publica: crear lead")
+            frappe.log_error(frappe.get_traceback(), "agenda-publica: crear oportunidad")
     elif name_existente:
         _nota_cita(doctype_existente, name_existente, datos, resultado, perfil)
 
@@ -219,7 +220,11 @@ def _enganchar_crm(perfil: str, resultado: dict, atribucion: dict) -> dict:
     return {
         "ok": True,
         "contacto": contacto,
-        "lead": lead,
+        # `lead` se conserva porque es la llave que ya lee el consumidor; desde
+        # 2026-09-22 el valor normal es una oportunidad (`ficha_doctype` dice cuál).
+        "lead": ficha,
+        "ficha": ficha,
+        "ficha_doctype": ficha_dt,
         "ya_existia": bool(name_existente),
     }
 
@@ -250,40 +255,28 @@ def _nota_cita(doctype: str, name: str, datos: dict, resultado: dict, perfil: st
         frappe.log_error(frappe.get_traceback(), "agenda-publica: nota en existente")
 
 
-def _crear_lead_agenda(portador, contacto, datos, atribucion, resultado):
-    """Lead propio en vez de reutilizar `_crear_lead` de captación: aquel gira alrededor de
-    los checkboxes de producto del formulario (etiqueta, valor estimado) y una reserva de
-    videollamada no declara producto. Forzarlo dejaría el lead con valor 0 y etiquetas
-    vacías, y la nota apuntando a una `Solicitud Web` que no existe."""
-    from frappe_chatwoot.utils.captacion import LEAD_OWNER_DEFAULT
+def _crear_oportunidad_agenda(portador, contacto, datos, atribucion, resultado):
+    """Oportunidad de una reserva de videollamada.
 
-    lead = frappe.get_doc({
-        "doctype": "CRM Lead",
-        "first_name": portador.nombre,
-        "lead_name": portador.nombre,
-        "status": "New",
-        "lead_owner": LEAD_OWNER_DEFAULT,
-        "email": portador.email,
-        "mobile_no": portador.telefono,
-        "contact": contacto,
-        "source": "Formulario web",
-    })
-    if datos.get("empresa") and hasattr(lead, "organization"):
-        lead.organization = datos["empresa"]
-    # `utm_medium` no tiene campo en `CRM Lead` (la migración de GHL trajo 6 de los 9 campos
-    # de atribución). Se queda en la nota, no se pierde.
-    for campo, valor in (
-        ("utm_source", atribucion.get("utm_source")),
-        ("utm_campaign", atribucion.get("utm_campaign")),
-        ("utm_term", atribucion.get("utm_term")),
-        ("gclid_ads", atribucion.get("gclid")),
-    ):
-        if valor and hasattr(lead, campo):
-            setattr(lead, campo, valor)
-    lead.insert(ignore_permissions=True)
+    No reutiliza `_crear_oportunidad` de captación porque aquel gira alrededor de los
+    checkboxes de producto del formulario (etiqueta, valor estimado) y una reserva de
+    videollamada no declara producto: forzarlo dejaría la ficha con valor 0 y etiquetas
+    vacías, y la nota apuntando a una `Solicitud Web` que no existe. Sí comparte el
+    insertor `_crear_ficha`, que decide `CRM Deal` (etapa Lead) vs. `CRM Lead` de respaldo
+    cuando no hay contacto."""
+    from frappe_chatwoot.utils.captacion import _crear_ficha
 
-    _nota_cita("CRM Lead", lead.name, datos, resultado, "leads")
-    return lead.name
+    ficha_dt, ficha = _crear_ficha(
+        contacto,
+        nombre=portador.nombre,
+        email=portador.email,
+        telefono=portador.telefono,
+        organization_name=datos.get("empresa"),
+        atribucion=atribucion,
+    )
+
+    _nota_cita(ficha_dt, ficha, datos, resultado, "leads")
+    return ficha_dt, ficha
 
 
 # ---------------------------------------------------------------------------

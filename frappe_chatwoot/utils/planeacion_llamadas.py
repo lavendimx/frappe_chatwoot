@@ -83,15 +83,18 @@ def _contacto_por_email(email):
     return fila[0].parent if fila else None
 
 
-def _crear_lead_desde_cita(cita, contacto):
-    """Ninguna ficha donde anotar significaba, hasta el 2026-09-18, tirar la hoja
+def _crear_oportunidad_desde_cita(cita, contacto):
+    """Ficha de una cita que no tiene ninguna: `CRM Deal` (etapa Lead) si hay
+    contacto, `CRM Lead` de respaldo si no. Devuelve `(doctype, name)`.
+
+    Ninguna ficha donde anotar significaba, hasta el 2026-09-18, tirar la hoja
     recién generada: un `Comment`/`FCRM Note` sobre `Contact` no se ve en el panel
     (`Contact.vue` solo tiene pestaña `Deals`) y sin contacto no hay dónde ponerla.
 
-    Se crea el lead, que además es lo correcto de negocio: un prospecto que agendó
-    una videollamada pertenece al embudo, no suelto como contacto. Mismo molde que
-    `agenda_publica._crear_lead_agenda`."""
-    from frappe_chatwoot.utils.captacion import LEAD_OWNER_DEFAULT
+    Se crea la ficha, que además es lo correcto de negocio: un prospecto que agendó
+    una videollamada pertenece al embudo, no suelto como contacto. Mismo insertor
+    `_crear_ficha` que `agenda_publica._crear_oportunidad_agenda`."""
+    from frappe_chatwoot.utils.captacion import _crear_ficha
 
     nombre = (cita.get("nombre_participante") or "").strip()
     doc_contacto = frappe.get_doc("Contact", contacto) if contacto else None
@@ -101,22 +104,14 @@ def _crear_lead_desde_cita(cita, contacto):
         nombre = (cita.get("email_participante") or "").split("@", 1)[0] or "Sin nombre"
 
     partes = nombre.split(" ", 1)
-    lead = frappe.get_doc({
-        "doctype": "CRM Lead",
-        "first_name": partes[0],
-        "last_name": partes[1] if len(partes) > 1 else "",
-        "lead_name": nombre,
-        "status": "New",
-        "lead_owner": LEAD_OWNER_DEFAULT,
-        "email": (cita.get("email_participante") or "").strip() or None,
-        "contact": contacto or None,
-        "source": "Formulario web",
-    })
     org = getattr(doc_contacto, "company_name", None) if doc_contacto else None
-    if org and hasattr(lead, "organization"):
-        lead.organization = org
-    lead.insert(ignore_permissions=True)
-    return lead.name
+    return _crear_ficha(
+        contacto,
+        first_name=partes[0],
+        last_name=partes[1] if len(partes) > 1 else "",
+        email=(cita.get("email_participante") or "").strip(),
+        organization_name=org,
+    )
 
 
 def _resolver_ficha(cita, crear=True):
@@ -154,9 +149,9 @@ def _resolver_ficha(cita, crear=True):
     if not crear:
         return (None, None)
     try:
-        return ("CRM Lead", _crear_lead_desde_cita(cita, contacto))
+        return _crear_oportunidad_desde_cita(cita, contacto)
     except Exception as exc:
-        frappe.log_error(f"planeacion_llamadas: no se pudo crear lead para {cita.get('name')}: {exc}",
+        frappe.log_error(f"planeacion_llamadas: no se pudo crear ficha para {cita.get('name')}: {exc}",
                           "Preparación de llamada v2")
         return (None, None)
 
