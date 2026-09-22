@@ -1055,7 +1055,7 @@ def avanzar():
         filters={"estado": "Activa", "proximo_en": ["<=", ahora]},
         fields=["name", "secuencia", "deal", "contacto", "conversation_id",
                 "paso_actual", "ultimo_envio_at"],
-        order_by="proximo_en asc",
+        order_by="proximo_en asc, name asc",
     )
 
     hechos, salidas, pospuestos = [], [], 0
@@ -1075,8 +1075,6 @@ def avanzar():
 
         tope = sec.get("max_por_corrida")
         tope = MAX_CORRIDA_DEFAULT if tope is None else tope
-        if tope and sec.setdefault("_hechos", 0) >= tope:
-            continue
 
         if not _dentro_de_ventana(sec, ahora):
             frappe.db.set_value("Secuencia Inscripcion", ins.name, "proximo_en",
@@ -1111,6 +1109,16 @@ def avanzar():
         paso = pasos[siguiente]
         paso = paso if isinstance(paso, dict) else paso.as_dict()
 
+        es_envio = paso.get("tipo") in ("WhatsApp", "Email")
+        # El freno es del CANAL, no del motor: solo frena ENVÍOS. Los pasos
+        # internos (Actualizar oportunidad / Esperar / Ventana de tiempo
+        # laboral) siempre avanzan, sin gastar plaza de ráfaga — antes el tope
+        # cortaba el ciclo completo y dejaba a los que sí mandan mensaje sin
+        # turno (medido 2026-09-22: 2/hora agotadas en pasos internos, 26
+        # vencidas sin salir).
+        if es_envio and tope and sec.setdefault("_hechos", 0) >= tope:
+            continue
+
         # Delay de ráfaga: solo antes de un WhatsApp real, y solo si ya salió
         # al menos uno en esta corrida — el primer envío nunca espera.
         if paso.get("tipo") == "WhatsApp" and envios_whatsapp_en_corrida > 0:
@@ -1131,11 +1139,23 @@ def avanzar():
         espera = frappe.utils.cint(paso.get("espera_minutos"))
         proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(ahora, minutes=espera or 1))
         cambios = {"paso_actual": siguiente + 1, "proximo_en": proximo}
-        if paso.get("tipo") in ("WhatsApp", "Email"):
+        if es_envio:
             cambios["ultimo_envio_at"] = ahora
         _set_ins(ins.name, cambios, update_modified=False)
+        # Commit por paso (2026-09-22): antes se commiteaba una sola vez al final
+        # de la corrida. Una corrida que moría a medias (timeout, cuelgue de red)
+        # dejaba mensajes YA enviados sin avanzar `paso_actual`, y la siguiente
+        # los repetía (ODM Express 17-sep, Gabriela Isaís 4-sep). Con el commit
+        # aquí, el envío y su avance van juntos: o quedan los dos, o ninguno.
+        frappe.db.commit()
 
-        sec["_hechos"] = sec.get("_hechos", 0) + 1
+        # El freno de ráfaga es del CANAL, no del motor: solo un envío real
+        # consume cupo. Antes contaba TODO paso — un "Actualizar oportunidad" o
+        # un "Esperar" gastaban plaza y dejaban sin turno a los que sí mandan
+        # mensaje (medido 2026-09-22: las 2 plazas/hora se agotaron en pasos
+        # internos y 26 vencidas nunca salieron).
+        if es_envio:
+            sec["_hechos"] = sec.get("_hechos", 0) + 1
         hechos.append((ins.name, siguiente + 1, nota))
 
     frappe.db.commit()
