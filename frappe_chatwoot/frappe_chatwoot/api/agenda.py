@@ -125,6 +125,14 @@ def opciones_agenda() -> dict:
     for fila in inboxes:
         opciones = _pedir_opcional("/calendario/agendar", {"modo": "listar_calendarios", "inbox_id": fila["inbox_id"]})
         fila["calendarios"] = (opciones or {}).get("calendarios") or []
+        # Pieza E (2026-09-22): "google" (default) o "frappe". El diálogo de alta lo usa
+        # para no prometer liga de Meet ni invitación por correo en un inbox cuya agenda es
+        # nativa — ver `agente-ia/lib/agenda-manual.js::listarCalendariosDeInbox`. Si
+        # agente-ia no responde queda "google", que es el comportamiento de siempre.
+        fila["fuente"] = (opciones or {}).get("fuente") or "google"
+        # Duración por default del perfil de agenda de ese inbox (30 min en Estrublock, sin
+        # dato en los de lavendi.mx). `None` = el diálogo usa su default de siempre.
+        fila["duracion_minutos"] = (opciones or {}).get("duracion_minutos")
 
     # Anfitriones: el equipo interno. Se filtra por dominio y no por rol a propósito —
     # los roles de ventas quedaron dispares tras la migración de GHL (a alejandro@ hubo que
