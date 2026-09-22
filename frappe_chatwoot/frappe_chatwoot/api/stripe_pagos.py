@@ -304,6 +304,16 @@ def _pago_ya_registrado(factura: str, referencia: str) -> str | None:
 
 
 def _aplicar_pago(factura: str, monto: float, referencia: str, fecha: str = None) -> dict:
+    # Lock de la fila de la factura: NO es cosmético. Stripe manda más de un
+    # evento por el mismo cobro (`checkout.session.completed` +
+    # `payment_intent.succeeded`, o un reintento) y `_pago_ya_registrado` es
+    # SELECT→INSERT, no atómico — dos entregas concurrentes leen "no registrado"
+    # antes de que alguna inserte y quedan DOS abonos del mismo cargo. Visto el
+    # 2026-09-14 en ACC-SINV-2026-00001: el mismo `pi_` cobrado dos veces
+    # ($4,000 contra una factura de $2,000). `FOR UPDATE` serializa por factura
+    # y se libera al commit: la segunda entrega ve el abono ya registrado (o el
+    # saldo en 0 y cae por "sin saldo").
+    frappe.db.sql("SELECT name FROM `tabSales Invoice` WHERE name = %s FOR UPDATE", factura)
     ya = _pago_ya_registrado(factura, referencia)
     if ya:
         return {"ok": True, "duplicado": True, "payment_entry": ya}
