@@ -12,6 +12,8 @@
 # vuelva a hablar solo porque el contacto escribió de nuevo sería repetir el
 # mismo bug que dejó a medio resolver el server.js original.
 
+import time
+
 import frappe
 
 from frappe_chatwoot.frappe_chatwoot.api.chatwoot import _pause_conversation, validate_role
@@ -69,9 +71,53 @@ def resume_conversation(conversation_id: int) -> None:
     """Reanuda el agente en esta conversación. Acción explícita desde la UI
     (botón 'Reanudar agente') — nunca automática, ver docstring del módulo."""
     validate_role()
-    name = frappe.db.exists("Chatwoot Pausa", {"conversation_id": frappe.utils.cint(conversation_id)})
+    cid = frappe.utils.cint(conversation_id)
+    name = frappe.db.exists("Chatwoot Pausa", {"conversation_id": cid})
     if name:
         frappe.delete_doc("Chatwoot Pausa", name, ignore_permissions=True)
+    # Además de quitar la pausa, deja marca de CUÁNDO se reanudó (ver get_reanudaciones).
+    # Sin esto, "Reanudar agente" no bastaba: el bot seguía callado los 90 min de
+    # silencio-humano desde el último mensaje del equipo anterior a la reanudación
+    # (caso Laisha, 2026-09-22).
+    _marcar_reanudacion(cid)
+
+
+def _marcar_reanudacion(conversation_id: int) -> None:
+    """Registra el instante de la reanudación explícita para esa conversación
+    (upsert por conversation_id). agente-ia lo lee con get_reanudaciones."""
+    existente = frappe.db.exists("Chatwoot Reanudacion", {"conversation_id": conversation_id})
+    if existente:
+        doc = frappe.get_doc("Chatwoot Reanudacion", existente)
+    else:
+        doc = frappe.new_doc("Chatwoot Reanudacion")
+        doc.conversation_id = conversation_id
+    doc.reanudado_por = frappe.session.user
+    doc.reanudado_at = frappe.utils.now()
+    # Epoch absoluto en ms para que agente-ia compare 1:1 contra created_at de Chatwoot.
+    # `frappe.utils.get_timestamp` no sirve: devuelve el valor en otra base horaria
+    # (verificado 2026-09-22) y corría la ventana de silencio varias horas.
+    doc.reanudado_ms = int(time.time() * 1000)
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+
+
+@frappe.whitelist()
+def get_reanudaciones() -> dict:
+    """{conversation_id: epoch_ms} de cada reanudación explícita. agente-ia lo usa
+    para NO contar como silencio-humano los mensajes del equipo ANTERIORES a la
+    reanudación — así el bot retoma en cuanto el cliente vuelve a escribir, en vez
+    de esperar HUMANO_SILENCIO_MS desde un mensaje humano ya superado. Un mensaje
+    humano POSTERIOR a la marca vuelve a silenciar con normalidad.
+    Sin gate de rol — mismo motivo que get_paused_conversations."""
+    rows = frappe.get_all(
+        "Chatwoot Reanudacion",
+        fields=["conversation_id", "reanudado_ms"],
+    )
+    out = {}
+    for row in rows:
+        if row.reanudado_ms:
+            out[str(row.conversation_id)] = int(row.reanudado_ms)
+    return out
 
 
 @frappe.whitelist()

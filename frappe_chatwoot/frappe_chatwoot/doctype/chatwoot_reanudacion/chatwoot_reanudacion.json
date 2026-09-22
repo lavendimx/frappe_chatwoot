@@ -1,0 +1,63 @@
+{
+ "name": "Chatwoot Reanudacion",
+ "doctype": "DocType",
+ "module": "Frappe Chatwoot",
+ "engine": "InnoDB",
+ "autoname": "field:conversation_id",
+ "field_order": [
+  "conversation_id",
+  "inbox_id",
+  "reanudado_por",
+  "reanudado_at",
+  "reanudado_ms"
+ ],
+ "fields": [
+  {
+   "fieldname": "conversation_id",
+   "label": "Conversation ID",
+   "fieldtype": "Int",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "inbox_id",
+   "label": "Inbox ID",
+   "fieldtype": "Data",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "reanudado_por",
+   "label": "Reanudado por",
+   "fieldtype": "Link",
+   "options": "User"
+  },
+  {
+   "fieldname": "reanudado_at",
+   "label": "Reanudado en",
+   "fieldtype": "Datetime"
+  },
+  {
+   "fieldname": "reanudado_ms",
+   "label": "Reanudado (epoch ms)",
+   "fieldtype": "Long Int",
+   "description": "Epoch absoluto en ms; lo consume agente-ia (comparación directa con created_at de Chatwoot)."
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "read": 1,
+   "write": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "import": 0,
+   "share": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "links": []
+}
