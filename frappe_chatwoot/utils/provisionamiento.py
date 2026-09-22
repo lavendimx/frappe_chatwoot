@@ -32,6 +32,10 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    una suscripción de un dispositivo podria, en teoria, validarse contra el
    backend equivocado. Se generan una sola vez, aqui, si el campo esta vacio.
 
+6. **App por defecto del sitio**: un sitio nuevo no tiene `default_app`, asi que
+   el login de un usuario de ventas cae en `/apps` (el conmutador) en vez del
+   CRM. Aqui se fija en `crm` si esta vacio.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
@@ -118,6 +122,7 @@ def ajustar_sitio():
         deduplicar_web_form_fields,
         _branding_plataforma,
         _idioma_plataforma,
+        _app_por_defecto,
         _quick_filters_deal,
         _vistas_por_defecto,
         _usuario_servicio_agente,
@@ -277,6 +282,24 @@ def _idioma_plataforma():
     if frappe.db.get_single_value("System Settings", "language"):
         return
     frappe.db.set_single_value("System Settings", "language", "es")
+
+
+def _app_por_defecto():
+    """App por defecto del sitio: el CRM.
+
+    Sin esto el login de un usuario de ventas cae en `/apps` (el conmutador de
+    apps), no en el CRM. Ni el `role_home_page` de hooks ni `Role.home_page`
+    sirven para esto: `frappe/auth.py` antepone `get_default_path()`, que
+    devuelve `/apps` cuando hay mas de una app instalada y ninguna ruta es
+    `/app` — el resultado de `get_home_page()` nunca se consulta. El lever real
+    es `System Settings.default_app`.
+
+    Solo si esta vacio: un cliente que prefiera otra landing no se pisa. El
+    `User.default_app` de un usuario sigue mandando por encima de este default.
+    """
+    if frappe.get_system_settings("default_app"):
+        return
+    frappe.db.set_single_value("System Settings", "default_app", "crm")
 
 
 def _quick_filters_deal():
