@@ -157,7 +157,7 @@ def listar(filtro: str = "por_cobrar", q: str = "", limit=200) -> list[dict]:
         f"""
         SELECT si.name, si.customer, si.customer_name, si.posting_date, si.due_date,
                si.grand_total, si.outstanding_amount, si.status, si.currency, si.remarks,
-               si.auto_repeat
+               si.auto_repeat, si.cfdi_total, si.cfdi_metodo_pago
         FROM `tabSales Invoice` si
         WHERE {' AND '.join(condiciones)}
         ORDER BY {orden}
@@ -185,6 +185,12 @@ def listar(filtro: str = "por_cobrar", q: str = "", limit=200) -> list[dict]:
         )
         if f["dias_vencida"] < 0:
             f["dias_vencida"] = 0
+        # Estado fiscal en la lista: `None` en `cfdi_total` significa "no se
+        # sabe" (el campo nació vacío el 18-sep y se llena por goteo), NO
+        # "no tiene CFDI". Por eso se expone el número, no un booleano.
+        f["cfdi_timbrado"] = frappe.utils.flt(f.pop("cfdi_total", 0))
+        f["cfdi_sin_timbrar"] = round(
+            float(f["grand_total"]) - f["cfdi_timbrado"], 2)
     return filas
 
 
@@ -229,6 +235,10 @@ def detalle(factura: str) -> dict:
             for i in doc.items
         ],
         "pagos": pagos,
+        # Estado fiscal completo (lista de UUID, timbrado, faltante). Va aquí
+        # para que el detalle de una factura responda "¿ya tiene CFDI?" sin una
+        # segunda llamada — era la pregunta que obligaba a buscar en Gmail.
+        "cfdi": _cfdi_de(factura),
     }
 
 
@@ -1173,3 +1183,232 @@ def cartera_de_contacto(contact: str) -> dict:
         "facturas": facturas,
         "pagos": pagos,
     }
+
+
+# ---------------------------------------------------------------------------
+# CFDI emitido — paso 1 de `planes/facturacion-cfdi-de-detectar-a-ejecutar.md`
+# ---------------------------------------------------------------------------
+# La cuenta por cobrar no sabía si ya tenía CFDI: había que buscar el XML a mano
+# en Gmail (lo que tuvo que hacer la sesión de `cfo` con Félix el 18-sep). Sin
+# ese dato, cualquier automatismo que se acerque a facturar puede emitir un CFDI
+# duplicado, y un CFDI timbrado es caro de cancelar.
+#
+# `cfdi_uuid` es una LISTA (una línea por CFDI) y no un campo simple porque el
+# primer caso real ya lo rompe: ACC-SINV-2026-00025 ($59,400 de Félix) se
+# facturó en dos mitades de $29,700. Un solo UUID habría dicho "ya facturada"
+# con la mitad sin timbrar — el error opuesto y peor, porque deja de avisar.
+#
+# Formato por línea (ni el UUID ni la fecha ISO contienen `|`):
+#     <uuid>|<fecha_timbrado ISO>|<total>|<PUE|PPD>
+
+METODOS_CFDI = ("PUE", "PPD")
+
+# 36 caracteres, 5 grupos hex. Se valida porque un UUID mal capturado es peor
+# que ninguno: hace creer que la factura está protegida cuando no lo está.
+RE_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+# Tolerancia al comparar timbrado contra total de la factura. Un CFDI puede
+# diferir unos centavos del Sales Invoice por redondeo del subtotal (guatson
+# calcula el IVA sobre el precio sin IVA, ERPNext parte del total).
+TOLERANCIA_CFDI = 1.0
+
+
+def _cfdi_lineas(texto: str | None) -> list[dict]:
+    """Parsea el campo `cfdi_uuid`. Una línea ilegible se ignora en silencio
+    para no romper la lectura de la factura entera — pero nunca se reescribe,
+    así que no se pierde: sigue ahí para que un humano la vea."""
+    salida = []
+    for linea in (texto or "").splitlines():
+        linea = linea.strip()
+        if not linea:
+            continue
+        partes = linea.split("|")
+        if not RE_UUID.match(partes[0].strip()):
+            continue
+        salida.append({
+            "uuid": partes[0].strip().lower(),
+            "fecha": partes[1].strip() if len(partes) > 1 else None,
+            "total": frappe.utils.flt(partes[2]) if len(partes) > 2 else 0.0,
+            "metodo": partes[3].strip().upper() if len(partes) > 3 else None,
+        })
+    return salida
+
+
+def _cfdi_derivados(lineas: list[dict]) -> dict:
+    """Los tres escalares que se guardan junto a la lista. Existen para poder
+    filtrar y reportar sin parsear texto en cada consulta; la lista es la
+    fuente de verdad.
+
+    `metodo` = PPD si CUALQUIER CFDI de la factura es PPD: es el que obliga a
+    emitir complemento de pago, y basta uno para que la obligación exista."""
+    return {
+        "cfdi_total": round(sum(l["total"] for l in lineas), 2),
+        "cfdi_metodo_pago": ("PPD" if any(l["metodo"] == "PPD" for l in lineas)
+                             else ("PUE" if lineas else None)),
+        "cfdi_fecha_timbrado": max((l["fecha"] for l in lineas if l["fecha"]), default=None),
+    }
+
+
+def _cfdi_de(factura: str) -> dict:
+    inv = frappe.db.get_value(
+        "Sales Invoice", factura,
+        ["name", "customer_name", "docstatus", "grand_total", "outstanding_amount",
+         "cfdi_uuid", "cfdi_total", "cfdi_metodo_pago", "cfdi_fecha_timbrado"],
+        as_dict=True)
+    if not inv:
+        frappe.throw("La factura no existe")
+
+    lineas = _cfdi_lineas(inv.cfdi_uuid)
+    timbrado = round(sum(l["total"] for l in lineas), 2)
+    total = frappe.utils.flt(inv.grand_total)
+    return {
+        "factura": inv.name,
+        "cliente": inv.customer_name,
+        "grand_total": total,
+        "tiene_cfdi": bool(lineas),
+        "cfdi": lineas,
+        "timbrado": timbrado,
+        "sin_timbrar": round(max(total - timbrado, 0), 2),
+        # Tres estados, no dos: "parcial" es el caso de Félix y es justo el que
+        # un booleano `ya_facturada` habría reportado mal.
+        "estado_cfdi": ("sin_cfdi" if not lineas
+                        else "completo" if timbrado >= total - TOLERANCIA_CFDI
+                        else "parcial"),
+        "metodo_pago": inv.cfdi_metodo_pago,
+        "ultimo_timbrado": inv.cfdi_fecha_timbrado,
+    }
+
+
+@frappe.whitelist()
+def estado_cfdi(factura: str) -> dict:
+    """¿Esta factura ya tiene CFDI, y por cuánto? Sin tocar Gmail."""
+    validate_role()
+    return _cfdi_de(factura)
+
+
+@frappe.whitelist()
+def marcar_cfdi(factura: str, uuid: str, total, fecha_timbrado: str = None,
+                metodo_pago: str = "PUE", forzar: int = 0) -> dict:
+    """Registra un CFDI ya timbrado contra una factura. Lo llama el skill
+    `facturacion` al terminar su Paso 6, nunca un humano a mano.
+
+    APPEND-ONLY, no set-once a secas: una factura puede tener varios CFDI
+    (parcialidades). Lo que es set-once es cada UUID — nunca se edita ni se
+    borra una línea ya escrita.
+
+    Tres guardas, y las tres importan por separado:
+
+    1. `uuid` repetido en ESTA factura -> no-op idempotente. Protege del
+       reintento (el skill puede reejecutarse tras un fallo de red) sin
+       necesitar que el caller lleve estado.
+    2. `uuid` pegado a OTRA factura -> se rechaza. Es la guarda anti-doble
+       contabilización: un mismo folio fiscal no puede amortizar dos cuentas
+       por cobrar.
+    3. timbrar más que el total de la factura -> se rechaza salvo `forzar=1`.
+       Es la única señal automática de sobrefacturación que existe hoy; se deja
+       forzable porque un caso legítimo (nota de crédito, refacturación por
+       cancelación) no debe quedar trabado esperando código nuevo.
+
+    Se escribe con `frappe.db.set_value` y no con `doc.save()` por lo mismo que
+    `editar_factura`: la factura está presentada (docstatus=1) y `save()` la
+    rechazaría. Estos campos no viven en ningún GL Entry — son metadata fiscal,
+    no contable.
+    """
+    validate_role()
+
+    uuid = (uuid or "").strip().lower()
+    if not RE_UUID.match(uuid):
+        frappe.throw("UUID inválido: se espera el folio fiscal de 36 caracteres del CFDI")
+
+    metodo_pago = (metodo_pago or "PUE").strip().upper()
+    if metodo_pago not in METODOS_CFDI:
+        frappe.throw(f"metodo_pago debe ser {' o '.join(METODOS_CFDI)}")
+
+    total = frappe.utils.flt(total)
+    if total <= 0:
+        frappe.throw("El total del CFDI debe ser mayor a cero")
+
+    inv = frappe.db.get_value(
+        "Sales Invoice", factura,
+        ["name", "docstatus", "grand_total", "cfdi_uuid"], as_dict=True)
+    if not inv:
+        frappe.throw("La factura no existe")
+    if inv.docstatus != 1:
+        frappe.throw("La factura no está emitida")
+
+    lineas = _cfdi_lineas(inv.cfdi_uuid)
+
+    # (1) idempotencia
+    if any(l["uuid"] == uuid for l in lineas):
+        return {**_cfdi_de(factura), "accion": "sin_cambio"}
+
+    # (2) el mismo folio fiscal en otra factura
+    otra = frappe.db.sql(
+        """SELECT name FROM `tabSales Invoice`
+           WHERE cfdi_uuid LIKE %s AND name != %s AND docstatus = 1 LIMIT 1""",
+        (f"%{uuid}%", factura))
+    if otra:
+        frappe.throw(
+            f"Ese folio fiscal ya está registrado en {otra[0][0]}. "
+            "Un CFDI no puede amortizar dos facturas — verifica cuál es la correcta.")
+
+    # (3) sobrefacturación
+    nuevo_timbrado = round(sum(l["total"] for l in lineas) + total, 2)
+    limite = frappe.utils.flt(inv.grand_total) + TOLERANCIA_CFDI
+    if nuevo_timbrado > limite and not frappe.utils.cint(forzar):
+        frappe.throw(
+            f"El CFDI dejaría timbrado ${nuevo_timbrado:,.2f} contra una factura de "
+            f"${frappe.utils.flt(inv.grand_total):,.2f}. Si es correcto (refacturación, "
+            "nota de crédito), repite con forzar=1.")
+
+    fecha = fecha_timbrado or frappe.utils.now()
+    linea = f"{uuid}|{frappe.utils.get_datetime(fecha).isoformat()}|{total:.2f}|{metodo_pago}"
+    lineas_txt = ((inv.cfdi_uuid or "").rstrip() + "\n" + linea).strip()
+
+    derivados = _cfdi_derivados(_cfdi_lineas(lineas_txt))
+    frappe.db.set_value("Sales Invoice", factura,
+                        {"cfdi_uuid": lineas_txt, **derivados}, update_modified=False)
+    frappe.db.commit()
+    return {**_cfdi_de(factura), "accion": "registrado"}
+
+
+@frappe.whitelist()
+def sin_cfdi(filtro: str = "todas", limit=200) -> list[dict]:
+    """Facturas emitidas con saldo fiscal sin timbrar. Es el reverso de
+    `estado_cfdi`: en vez de preguntar por una, lista las que faltan.
+
+    Arranca devolviendo casi toda la cartera —nada tiene CFDI registrado
+    todavía, el campo nace vacío— y se va vaciando conforme el skill
+    `facturacion` escriba. Eso es lo correcto: vacío significa "no se sabe",
+    no "no tiene". El backfill histórico es manual y va por goteo.
+    """
+    validate_role()
+    if filtro not in FILTROS:
+        frappe.throw("filtro inválido")
+
+    condiciones = ["si.docstatus = 1",
+                   "(si.cfdi_total IS NULL OR si.cfdi_total < si.grand_total - %(tol)s)"]
+    valores = {"tol": TOLERANCIA_CFDI, "limite": frappe.utils.cint(limit) or 200}
+
+    estados = FILTROS[filtro]
+    if estados:
+        condiciones.append("si.status IN %(estados)s")
+        valores["estados"] = tuple(estados)
+
+    filas = frappe.db.sql(
+        f"""
+        SELECT si.name, si.customer_name, si.posting_date, si.grand_total,
+               si.outstanding_amount, si.status, si.cfdi_total, si.cfdi_metodo_pago
+        FROM `tabSales Invoice` si
+        WHERE {' AND '.join(condiciones)}
+        ORDER BY si.posting_date DESC
+        LIMIT %(limite)s
+        """,
+        valores, as_dict=True)
+
+    for f in filas:
+        f["estado_es"] = ESTADO_ES.get(f["status"], f["status"])
+        f["timbrado"] = frappe.utils.flt(f.get("cfdi_total"))
+        f["sin_timbrar"] = round(frappe.utils.flt(f["grand_total"]) - f["timbrado"], 2)
+    return filas
