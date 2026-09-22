@@ -187,14 +187,6 @@
   "details": null,
   "docstatus": 0,
   "doctype": "CRM Lead Source",
-  "modified": "2026-09-06 08:22:37.953174",
-  "name": "WhatsApp",
-  "source_name": "WhatsApp"
- },
- {
-  "details": null,
-  "docstatus": 0,
-  "doctype": "CRM Lead Source",
   "modified": "2026-09-06 08:22:37.941644",
   "name": "Formulario de cotización",
   "source_name": "Formulario de cotización"
@@ -206,5 +198,13 @@
   "modified": "2026-09-11 06:30:45.834395",
   "name": "Formulario web",
   "source_name": "Formulario web"
+ },
+ {
+  "details": null,
+  "docstatus": 0,
+  "doctype": "CRM Lead Source",
+  "modified": "2026-09-06 08:22:37.953174",
+  "name": "WhatsApp",
+  "source_name": "WhatsApp"
  }
 ]

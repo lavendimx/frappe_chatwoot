@@ -34,17 +34,6 @@
  },
  {
   "color": "blue",
-  "deal_status": "Contactado",
-  "docstatus": 0,
-  "doctype": "CRM Deal Status",
-  "modified": "2026-09-06 12:46:04.543685",
-  "name": "Contactado",
-  "position": 3,
-  "probability": 23.08,
-  "type": "Ongoing"
- },
- {
-  "color": "blue",
   "deal_status": "Cotizado",
   "docstatus": 0,
   "doctype": "CRM Deal Status",
@@ -174,5 +163,16 @@
   "position": 2,
   "probability": 15.38,
   "type": "Open"
+ },
+ {
+  "color": "blue",
+  "deal_status": "Contactado",
+  "docstatus": 0,
+  "doctype": "CRM Deal Status",
+  "modified": "2026-09-06 12:46:04.543685",
+  "name": "Contactado",
+  "position": 3,
+  "probability": 23.08,
+  "type": "Ongoing"
  }
 ]

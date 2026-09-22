@@ -113,8 +113,7 @@ VISTAS_CLIENTE = [
 def ajustar_sitio():
     """Punto de entrada de `after_migrate`. Nunca lanza."""
     for paso in (
-        _borrar_etapas_nativas,
-        _corregir_typo,
+        sembrar_catalogos_una_vez,
         aplicar_fixtures_erpnext,
         deduplicar_web_form_fields,
         _branding_plataforma,
@@ -130,6 +129,44 @@ def ajustar_sitio():
         except Exception:
             frappe.db.rollback()
             frappe.log_error(frappe.get_traceback(), f"provisionamiento: {paso.__name__}")
+
+
+BANDERA_CATALOGOS = "fc_catalogos_sembrados"
+
+
+def sembrar_catalogos_una_vez():
+    """Siembra el embudo curado (CRM Deal Status / Lead Source / Lost Reason) y
+    limpia las etapas nativas de frappe/crm — UNA SOLA VEZ por sitio.
+
+    Por que no son fixtures (cambio del 2026-09-22): un fixture hace upsert en
+    CADA `bench migrate`, asi que estos catalogos —que son datos de negocio de
+    lavendi.mx, no producto— se re-imponian sobre el embudo que el cliente ya
+    habia curado. Medido en estrublock.lavendi.mx: 34 `CRM Deal Status` = sus 18
+    propias (migradas de su GHL) + nuestras 16 encima, como columnas ajenas en su
+    kanban. Depurarlas a mano no servia de nada: volvian al siguiente migrate.
+
+    Con la bandera, un sitio nuevo sigue naciendo con el embudo curado (mejor que
+    las 22 etapas en ingles de frappe/crm) y uno existente deja de ser pisado.
+    El borrado de etapas nativas y la correccion del typo se mudaron aqui adentro
+    por la misma razon: son parte del nacimiento del sitio, no mantenimiento
+    perpetuo — re-borrar en cada migrate una etapa que el cliente recreo a
+    proposito es el mismo defecto.
+
+    Para re-sembrar a mano un sitio concreto:
+        frappe.db.set_default("fc_catalogos_sembrados", "")  # y correr ajustar_sitio()
+    """
+    if frappe.db.get_default(BANDERA_CATALOGOS):
+        return
+
+    ruta = os.path.join(frappe.get_app_path("frappe_chatwoot"), "fixtures", "catalogos")
+    if os.path.isdir(ruta):
+        from frappe.core.doctype.data_import.data_import import import_doc
+
+        import_doc(ruta)
+
+    _borrar_etapas_nativas()
+    _corregir_typo()
+    frappe.db.set_default(BANDERA_CATALOGOS, "1")
 
 
 def _borrar_etapas_nativas():

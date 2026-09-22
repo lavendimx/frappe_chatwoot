@@ -272,14 +272,21 @@ fixtures = [
     {"dt": "Web Form", "filters": [["module", "=", "Custom"]]},
 ]
 
-# Datos de catalogo del embudo y de origen/perdida — no son doctypes propios,
-# son REGISTROS de doctypes de crm que el equipo curó (16 etapas, 25 origenes,
-# 11 razones de perdida). Sin esto un sitio nuevo nace con las 22 etapas en
-# ingles de frappe/crm y sin los origenes de lavendi.mx.
+# Los catalogos del embudo (CRM Deal Status / Lead Source / Lost Reason) ESTUVIERON
+# aqui hasta el 2026-09-22 y se sacaron a proposito. Eran contaminacion inversa:
+# son datos de negocio de lavendi.mx, no producto, y al viajar como fixture se
+# re-imponian en CADA `bench migrate` de CADA sitio. Medido en estrublock: 34
+# etapas = sus 18 curadas de su propio GHL + nuestras 16 encima, visibles como
+# columnas ajenas en su kanban ("Videollamada de cierre", "Seguimiento SGPT/Ads
+# iniciado", "Temporal"). Un cliente que depurara su embudo lo veia volver al
+# siguiente migrate.
+#
+# Ahora viven en fixtures/catalogos/ (fuera del barrido automatico de `fixtures/`,
+# igual que fixtures/erpnext/) y los siembra
+# utils/provisionamiento.sembrar_catalogos_una_vez() SOLO la primera vez por sitio.
+# Un sitio nuevo sigue naciendo con el embudo curado; uno existente deja de ser
+# pisado.
 fixtures += [
-    {"dt": "CRM Deal Status"},
-    {"dt": "CRM Lead Source"},
-    {"dt": "CRM Lost Reason"},
     # Los layouts del CRM (que campos se ven en el alta, el tab Datos y el panel
     # lateral). El equipo los curo a mano en crm.lavendi.mx — cierre 17: ocultar
     # los campos muertos; cierre 19: "Valor de la oportunidad" en los 3 layouts
@@ -293,8 +300,10 @@ fixtures += [
 # after_migrate — cierra el hueco que los fixtures no pueden cerrar
 # ---------------------------------------------------------------------------
 # Los fixtures hacen upsert, no borran. frappe/crm instala 22 etapas de embudo
-# en ingles; el fixture agrega/actualiza las 16 de lavendi.mx pero dejaria las
+# en ingles; la siembra inicial agrega las 16 de lavendi.mx pero dejaria las
 # 6 nativas que produccion borro. Ver utils/provisionamiento.py.
+# OJO: la siembra de catalogos y el borrado de etapas nativas corren UNA SOLA VEZ
+# por sitio (bandera `fc_catalogos_sembrados`), no en cada migrate.
 after_migrate = [
     "frappe_chatwoot.utils.provisionamiento.ajustar_sitio",
 ]
