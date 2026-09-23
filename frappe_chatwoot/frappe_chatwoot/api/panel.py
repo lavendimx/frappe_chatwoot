@@ -31,6 +31,8 @@ import frappe
 
 from frappe_chatwoot.utils import autoria
 from frappe_chatwoot.utils import chatwoot_client as cw
+from frappe_chatwoot.utils import telefono as tel
+from frappe_chatwoot.utils.chatwoot_contactos import _contacto_chatwoot
 
 from .chatwoot import _pause_conversation, validate_role
 
@@ -46,9 +48,9 @@ MAX_ADJUNTOS = 5
 def telefono_corto(telefono: str | None) -> str | None:
     """Últimos 10 dígitos. Absorbe lada de país, +, espacios y guiones: el mismo
     número llega como '+52 1 555 966 8622', '5215559668622' o '5559668622'
-    según venga de WhatsApp, de la migración de GHL o capturado a mano."""
-    digitos = re.sub(r"\D", "", telefono or "")
-    return digitos[-10:] if len(digitos) >= 10 else None
+    según venga de WhatsApp, de la migración de GHL o capturado a mano.
+    Delega en `utils.telefono.corto` para no repetir el criterio (2026-09-23)."""
+    return tel.corto(telefono)
 
 
 def _contacto_por_telefono(telefono: str | None) -> str | None:
@@ -216,6 +218,84 @@ def search_crm_contacts(query: str = "", limit: int = 10) -> list[dict]:
         limit=frappe.utils.cint(limit) or 10,
     )
     return [c for c in contactos if c.get("mobile_no")]
+
+
+# ---------------------------------------------------------------------------
+# Fusionar contactos duplicados (T4, 2026-09-23)
+#
+# Un mismo cliente termina con dos `Contact` y dos conversaciones cuando su
+# teléfono entró con y sin el "1" móvil (caso Anabel Osuna: `+524422196109` vs
+# `5214422196109`). Chatwoot 4.17.1 ya trae la fusión nativa; antes había que
+# hacerlo a mano contacto por contacto.
+# ---------------------------------------------------------------------------
+
+
+def _resolver_contacto_chatwoot(valor) -> tuple[int, str | None]:
+    """Normaliza la entrada a `(chatwoot_id, contact_frappe)`.
+
+    Acepta las tres formas con las que el frontend puede mandar un contacto:
+      · un **id de Chatwoot** directo (numérico);
+      · el **nombre de un `Contact` de Frappe** (se resuelve por su teléfono);
+      · un **teléfono** (se busca el homólogo de Chatwoot por últimos 10 dígitos).
+    """
+    v = str(valor or "").strip()
+    if not v:
+        frappe.throw("Falta el contacto a fusionar")
+
+    if not v.isdigit() and frappe.db.exists("Contact", v):
+        tel = frappe.db.get_value("Contact", v, ["mobile_no", "phone"], as_dict=True) or {}
+        cw_contact = _contacto_chatwoot(tel.get("mobile_no") or tel.get("phone"))
+        if not cw_contact:
+            frappe.throw(f"El contacto {v} no tiene homólogo en Chatwoot (se busca por teléfono).")
+        return int(cw_contact["id"]), v
+
+    if v.isdigit():
+        return int(v), None
+
+    cw_contact = _contacto_chatwoot(v)
+    if not cw_contact:
+        frappe.throw(f"No se encontró un contacto de Chatwoot para {v!r}.")
+    return int(cw_contact["id"]), _contacto_por_telefono(v)
+
+
+@frappe.whitelist()
+def fusionar_contactos(base: str, mergee: str) -> dict:
+    """Fusiona dos contactos duplicados en Chatwoot (`base` absorbe a `mergee`).
+
+    Idempotente por par: si la fusión ya se registró en `Chatwoot Fusion`, no se
+    vuelve a llamar a Chatwoot (repetirla apuntaría a un `mergee` que ya no
+    existe). El registro deja la auditoría de quién fusionó, cuándo y qué dos
+    contactos de Frappe eran, porque la operación es irreversible desde Chatwoot.
+    """
+    validate_role()
+    base_id, base_contact = _resolver_contacto_chatwoot(base)
+    mergee_id, mergee_contact = _resolver_contacto_chatwoot(mergee)
+    if base_id == mergee_id:
+        frappe.throw("El contacto base y el duplicado son el mismo.")
+
+    ya = frappe.db.exists(
+        "Chatwoot Fusion",
+        {"base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id},
+    )
+    if ya:
+        return {"ok": True, "ya_fusionado": True, "name": ya,
+                "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id}
+
+    cw.merge_contacts(base_id, mergee_id)
+
+    doc = frappe.get_doc({
+        "doctype": "Chatwoot Fusion",
+        "base_chatwoot_id": base_id,
+        "mergee_chatwoot_id": mergee_id,
+        "base_contact": base_contact,
+        "mergee_contact": mergee_contact,
+        "fusionado_por": frappe.session.user,
+        "fusionado_at": frappe.utils.now(),
+    }).insert(ignore_permissions=True)
+    frappe.db.commit()
+    return {"ok": True, "ya_fusionado": False, "name": doc.name,
+            "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id,
+            "base_contact": base_contact, "mergee_contact": mergee_contact}
 
 
 # ---------------------------------------------------------------------------

@@ -177,7 +177,10 @@ class TestChatwootApiSendMessageValidation(FrappeTestCase):
     def test_content_is_stripped_before_send(self, mock_create):
         mock_create.return_value = {"id": 1}
         api.send_message(1, "  hello world  ")
-        mock_create.assert_called_once_with(1, "hello world")
+        # send_message estampa la autoria como `content_attributes` (utils/autoria.py).
+        # En tests la sesion es Administrator, a quien marca_humana excluye por nombre.
+        mock_create.assert_called_once_with(
+            1, "hello world", content_attributes={"humano": True})
 
 
 class TestConversationEndpointsRoleGate(FrappeTestCase):
@@ -221,7 +224,11 @@ class TestConversationEndpointsRoleGate(FrappeTestCase):
             with patch.object(frappe, "session") as mock_session:
                 mock_session.user = "sales@example.com"
                 api.send_message(1, "hello")
-        mock_create.assert_called_once_with(1, "hello")
+        # La marca incluye el usuario de la sesion (autoria.marca_humana). No hay
+        # fila User para ese correo, asi que `usuario_nombre` no se agrega.
+        mock_create.assert_called_once_with(
+            1, "hello",
+            content_attributes={"humano": True, "usuario": "sales@example.com"})
 
 
 class TestChatwootApiClearCache(FrappeTestCase):

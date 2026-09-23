@@ -27,6 +27,11 @@ import frappe
 # completa de la agencia: es información de negocio, no de su pipeline.
 ALLOWED_ROLES = ["System Manager", "Accounts Manager", "Accounts User", "Sales Manager"]
 
+# Cancelar un cargo es más delicado que verlo: anula un documento contable ya
+# emitido. Solo lo puede hacer quien tenga este rol (o Administrator). Se crea y
+# asigna con `frappe_chatwoot.cobranza_setup.ejecutar` (2026-09-23).
+ROL_CANCELACION = "Autorizador Cobranza"
+
 # Los filtros que el equipo realmente pide, no los 7 status de ERPNext.
 FILTROS = {
     "por_cobrar": ["Overdue", "Unpaid", "Partly Paid"],
@@ -62,6 +67,26 @@ def validate_role():
     roles = frappe.get_roles(frappe.session.user)
     if not any(r in roles for r in ALLOWED_ROLES) and frappe.session.user != "Administrator":
         frappe.throw("Sin permiso para consultar facturación", frappe.PermissionError)
+
+
+def _puede_cancelar() -> bool:
+    """¿El usuario de la sesión está autorizado a cancelar cargos?
+
+    Mismo patrón que `utils/secuencias._exigir_edicion`: Administrator siempre,
+    o el rol `Autorizador Cobranza`. La interfaz lo usa para mostrar/ocultar el
+    botón; el backend lo vuelve a exigir en `cancelar_factura` (el botón no es
+    la seguridad)."""
+    if frappe.session.user == "Administrator":
+        return True
+    return ROL_CANCELACION in frappe.get_roles(frappe.session.user)
+
+
+def _exigir_cancelacion():
+    if not _puede_cancelar():
+        frappe.throw(
+            f"Sin permiso para cancelar cargos: se requiere el rol '{ROL_CANCELACION}'.",
+            frappe.PermissionError,
+        )
 
 
 def _moldes() -> set:
@@ -239,6 +264,9 @@ def detalle(factura: str) -> dict:
         # para que el detalle de una factura responda "¿ya tiene CFDI?" sin una
         # segunda llamada — era la pregunta que obligaba a buscar en Gmail.
         "cfdi": _cfdi_de(factura),
+        # El frontend muestra el botón "Cancelar" solo si esto es true; el
+        # backend lo vuelve a validar en `cancelar_factura`.
+        "puede_cancelar": _puede_cancelar(),
     }
 
 
@@ -293,6 +321,111 @@ def editar_factura(factura: str, due_date: str) -> dict:
     frappe.get_doc("Sales Invoice", factura).set_status(update=True)
     frappe.db.commit()
     return detalle(factura)
+
+
+def _tiene_pago_aplicado(factura: str) -> bool:
+    """¿Hay algún `Payment Entry` vigente aplicado a esta factura?
+
+    Se mira la tabla hija `Payment Entry Reference` (no `outstanding_amount`):
+    un pago puede haberse aplicado y luego desasignado, y su referencia seguiría
+    ahí. Solo cuentan los pagos con docstatus=1 — uno cancelado no bloquea."""
+    return bool(frappe.db.sql(
+        """
+        SELECT per.name
+        FROM `tabPayment Entry Reference` per
+        JOIN `tabPayment Entry` pe ON pe.name = per.parent
+        WHERE per.reference_name = %s AND per.reference_doctype = 'Sales Invoice'
+          AND pe.docstatus = 1
+        LIMIT 1
+        """,
+        factura,
+    ))
+
+
+def _comentario_cancelacion(factura: str, motivo: str) -> None:
+    """Deja el motivo en el timeline de la factura, aparte del campo — así queda
+    quién canceló y por qué aunque alguien borre el campo a mano."""
+    frappe.get_doc({
+        "doctype": "Comment",
+        "comment_type": "Info",
+        "reference_doctype": "Sales Invoice",
+        "reference_name": factura,
+        "content": (f"Factura cancelada por {frappe.session.user}. "
+                    f"Motivo: {motivo}"),
+    }).insert(ignore_permissions=True)
+
+
+@frappe.whitelist()
+def cancelar_factura(factura: str, motivo: str) -> dict:
+    """Anula una factura emitida (docstatus 1 -> 2), conservando el registro.
+
+    Regla de Alejandro (2026-09-23): los documentos NO se borran, se anulan. La
+    cancelación nativa de ERPNext (`doc.cancel()`) deja `docstatus=2` y el
+    asiento de reversión, así que la factura sigue consultable — es justo lo que
+    se pide.
+
+    Está gateada por el rol `Autorizador Cobranza` (o Administrator): anular un
+    documento contable no es una acción operativa cualquiera.
+
+    Tres guardas ANTES de cancelar, en orden de dependencia:
+      1. Debe estar emitida (`docstatus=1`). Un borrador se elimina, no se anula;
+         una ya cancelada no tiene nada que hacer.
+      2. No debe tener pago aplicado. El pago está amarrado a la factura por
+         `Payment Entry Reference`; hay que cancelar el pago primero.
+      3. No debe tener CFDI timbrado (`cfdi_uuid`). Primero se cancela el CFDI
+         en el SAT; si no, quedaría un comprobante fiscal vivo contra una factura
+         anulada.
+
+    `motivo` es obligatorio (mínimo 5 caracteres) y se persiste en el campo
+    `motivo_cancelacion` (Custom Field) más un `Comment` de auditoría.
+    """
+    _exigir_cancelacion()
+
+    motivo = (motivo or "").strip()
+    if len(motivo) < 5:
+        frappe.throw("El motivo es obligatorio (mínimo 5 caracteres).")
+
+    doc = frappe.get_doc("Sales Invoice", factura)
+    if doc.docstatus != 1:
+        frappe.throw("Solo se puede cancelar una factura emitida "
+                     "(no un borrador ni una ya cancelada).")
+
+    pagado = frappe.utils.flt(doc.grand_total) - frappe.utils.flt(doc.outstanding_amount)
+    if pagado > 0.009 or _tiene_pago_aplicado(factura):
+        frappe.throw("La factura tiene un pago aplicado: cancela primero el pago.")
+
+    if (doc.get("cfdi_uuid") or "").strip():
+        frappe.throw("La factura tiene CFDI timbrado: cancélalo en el SAT antes "
+                     "de cancelar la factura.")
+
+    try:
+        # Ya se autorizó arriba; el bypass evita que un rol que no tiene permiso
+        # de `cancel` sobre Sales Invoice en el Desk tumbe la acción legítima.
+        doc.flags.ignore_permissions = True
+        doc.cancel()
+    except Exception as exc:
+        frappe.log_error(
+            title="facturacion: cancelar_factura",
+            message=f"{factura}: {exc}",
+        )
+        frappe.throw(f"No se pudo cancelar la factura {factura}: {exc}")
+
+    if frappe.db.has_column("Sales Invoice", "motivo_cancelacion"):
+        frappe.db.set_value("Sales Invoice", factura, "motivo_cancelacion",
+                            motivo, update_modified=False)
+    _comentario_cancelacion(factura, motivo)
+    frappe.db.commit()
+
+    return {
+        "ok": True,
+        "name": doc.name,
+        "docstatus": doc.docstatus,
+        "status": "Cancelled",
+        "estado_es": ESTADO_ES.get("Cancelled", "Cancelada"),
+        "motivo": motivo,
+        "folio_ghl": _folio_ghl(doc.remarks, doc.get("auto_repeat"), doc.name),
+        "puede_cancelar": _puede_cancelar(),
+    }
 
 
 @frappe.whitelist()

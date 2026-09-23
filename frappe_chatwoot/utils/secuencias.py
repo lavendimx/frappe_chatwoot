@@ -1055,7 +1055,7 @@ def avanzar():
         filters={"estado": "Activa", "proximo_en": ["<=", ahora]},
         fields=["name", "secuencia", "deal", "contacto", "conversation_id",
                 "paso_actual", "ultimo_envio_at"],
-        order_by="proximo_en asc",
+        order_by="proximo_en asc, name asc",
     )
 
     hechos, salidas, pospuestos = [], [], 0
@@ -1075,8 +1075,6 @@ def avanzar():
 
         tope = sec.get("max_por_corrida")
         tope = MAX_CORRIDA_DEFAULT if tope is None else tope
-        if tope and sec.setdefault("_hechos", 0) >= tope:
-            continue
 
         if not _dentro_de_ventana(sec, ahora):
             frappe.db.set_value("Secuencia Inscripcion", ins.name, "proximo_en",
@@ -1111,6 +1109,16 @@ def avanzar():
         paso = pasos[siguiente]
         paso = paso if isinstance(paso, dict) else paso.as_dict()
 
+        es_envio = paso.get("tipo") in ("WhatsApp", "Email")
+        # El freno es del CANAL, no del motor: solo frena ENVÍOS. Los pasos
+        # internos (Actualizar oportunidad / Esperar / Ventana de tiempo
+        # laboral) siempre avanzan, sin gastar plaza de ráfaga — antes el tope
+        # cortaba el ciclo completo y dejaba a los que sí mandan mensaje sin
+        # turno (medido 2026-09-22: 2/hora agotadas en pasos internos, 26
+        # vencidas sin salir).
+        if es_envio and tope and sec.setdefault("_hechos", 0) >= tope:
+            continue
+
         # Delay de ráfaga: solo antes de un WhatsApp real, y solo si ya salió
         # al menos uno en esta corrida — el primer envío nunca espera.
         if paso.get("tipo") == "WhatsApp" and envios_whatsapp_en_corrida > 0:
@@ -1131,11 +1139,23 @@ def avanzar():
         espera = frappe.utils.cint(paso.get("espera_minutos"))
         proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(ahora, minutes=espera or 1))
         cambios = {"paso_actual": siguiente + 1, "proximo_en": proximo}
-        if paso.get("tipo") in ("WhatsApp", "Email"):
+        if es_envio:
             cambios["ultimo_envio_at"] = ahora
         _set_ins(ins.name, cambios, update_modified=False)
+        # Commit por paso (2026-09-22): antes se commiteaba una sola vez al final
+        # de la corrida. Una corrida que moría a medias (timeout, cuelgue de red)
+        # dejaba mensajes YA enviados sin avanzar `paso_actual`, y la siguiente
+        # los repetía (ODM Express 17-sep, Gabriela Isaís 4-sep). Con el commit
+        # aquí, el envío y su avance van juntos: o quedan los dos, o ninguno.
+        frappe.db.commit()
 
-        sec["_hechos"] = sec.get("_hechos", 0) + 1
+        # El freno de ráfaga es del CANAL, no del motor: solo un envío real
+        # consume cupo. Antes contaba TODO paso — un "Actualizar oportunidad" o
+        # un "Esperar" gastaban plaza y dejaban sin turno a los que sí mandan
+        # mensaje (medido 2026-09-22: las 2 plazas/hora se agotaron en pasos
+        # internos y 26 vencidas nunca salieron).
+        if es_envio:
+            sec["_hechos"] = sec.get("_hechos", 0) + 1
         hechos.append((ins.name, siguiente + 1, nota))
 
     frappe.db.commit()
@@ -1268,7 +1288,8 @@ def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) ->
     Se busca por nombre de contacto (el caso normal: el humano piensa en la
     persona, no en el id del deal), por empresa, teléfono o correo. Devuelve
     `ya_inscrito` cuando se pide una secuencia, para que el diálogo no ofrezca
-    meter dos veces a la misma persona.
+    meter dos veces a la misma persona. Solo marca las inscripciones **Activas**:
+    las `Terminada`/`Salió` no bloquean una reinscripción manual.
     """
     q = (q or "").strip()
     if len(q) < 2:
@@ -1307,9 +1328,15 @@ def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) ->
     )
     inscritos = set()
     if secuencia:
+        # Solo cuentan las inscripciones VIGENTES. Una que terminó o de la que el
+        # contacto salió no debe marcar "ya inscrito": la lista de la pantalla
+        # filtra por `Activa`, y marcar cualquier estado hacía que el diálogo
+        # dijera "Ya inscrito" sobre alguien que la lista no mostraba (el
+        # contacto se podía reinscribir a mano, pero el diálogo lo bloqueaba).
         inscritos = {
             r[0] for r in frappe.db.sql(
-                "SELECT deal FROM `tabSecuencia Inscripcion` WHERE secuencia=%s",
+                "SELECT deal FROM `tabSecuencia Inscripcion` "
+                "WHERE secuencia=%s AND estado='Activa'",
                 secuencia,
             )
         }
@@ -1340,12 +1367,22 @@ def inscribir_deal(secuencia: str, deal: str) -> dict:
     )
     if not d:
         frappe.throw("Esa oportunidad no existe")
+
+    # Solo una inscripción VIGENTE bloquea. Una `Terminada`/`Salió` se reactiva
+    # más abajo — criterio alineado con `buscar_deals` y con la lista, que
+    # filtran por `Activa` (2026-09-23, caso Claudia Gamboa: el diálogo decía
+    # "Ya inscrito" sobre alguien que la lista no mostraba como inscrito).
+    activa = frappe.db.get_value(
+        "Secuencia Inscripcion",
+        {"secuencia": secuencia, "deal": deal, "estado": "Activa"},
+        "name",
+    )
+    if activa:
+        frappe.throw("Esa oportunidad ya está inscrita en esa secuencia")
     existente = frappe.db.get_value(
         "Secuencia Inscripcion", {"secuencia": secuencia, "deal": deal},
-        ["name", "estado"], as_dict=True,
+        ["name", "estado"], as_dict=True, order_by="modified desc",
     )
-    if existente and existente.estado == "Activa":
-        frappe.throw("Esa oportunidad ya está inscrita en esa secuencia")
 
     sec = frappe.get_doc("Secuencia", secuencia).as_dict()
     conv = _conversacion_de(deal, d.contact)

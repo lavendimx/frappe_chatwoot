@@ -31,6 +31,8 @@ import urllib.request
 
 import frappe
 
+from frappe_chatwoot.utils import telefono as tel
+
 # Etiqueta y mensaje por producto. Los textos son los de las plantillas de GHL
 # rescatadas (`plantillas-sms-formulario.txt`), literales salvo las imágenes:
 # esas vivían en el storage de la subcuenta y se rehospedaron en lavendi.mx.
@@ -100,8 +102,9 @@ def _etiquetas(doc):
 
 
 def _telefono_corto(telefono):
-    digitos = "".join(c for c in (telefono or "") if c.isdigit())
-    return digitos[-10:] if len(digitos) >= 10 else None
+    """Delega en `utils.telefono.corto` (2026-09-23): mismo criterio en todo el
+    CRM para no duplicar la expresión regular."""
+    return tel.corto(telefono)
 
 
 # "Aquí ya no se trabaja". Un match contra uno de estos NO bloquea la creación
@@ -180,17 +183,21 @@ def _asegurar_contacto(doc):
                             fields=["name"], limit=1)
         if ya:
             return ya[0].name
+    # Guardar el teléfono en su forma canónica E.164 (`+52` + 10) en vez del
+    # texto crudo del formulario: es el origen del duplicado `+52...` vs
+    # `521...` que dejó a un mismo cliente con dos fichas (2026-09-23).
+    telefono_norm = tel.e164_mx(doc.telefono) or doc.telefono
     partes = (doc.nombre or "").strip().split(" ", 1)
     contacto = frappe.get_doc({
         "doctype": "Contact",
         "first_name": partes[0] or "Sin nombre",
         "last_name": partes[1] if len(partes) > 1 else "",
-        "mobile_no": doc.telefono,
+        "mobile_no": telefono_norm,
     })
     if doc.email:
         contacto.append("email_ids", {"email_id": doc.email, "is_primary": 1})
-    if doc.telefono:
-        contacto.append("phone_nos", {"phone": doc.telefono, "is_primary_mobile_no": 1})
+    if telefono_norm:
+        contacto.append("phone_nos", {"phone": telefono_norm, "is_primary_mobile_no": 1})
     contacto.insert(ignore_permissions=True)
     return contacto.name
 
