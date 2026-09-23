@@ -124,6 +124,19 @@ doc_events = {
             "frappe_chatwoot.utils.onboarding.on_deal_update",
             "frappe_chatwoot.utils.nutricion.on_deal_update",
         ],
+        # `_assign` -> `deal_owner`. Va en `on_change`, NO en `on_update`: la
+        # `Assignment Rule` corre en el hook comodín `"*"` de `on_update`, y
+        # Frappe ejecuta los handlers del doctype ANTES que los comodines, así
+        # que un `on_update` propio leería un `_assign` viejo. `on_change` corre
+        # después de `on_update` (por eso el `ToDo` ya escribió `_assign`). El
+        # porqué completo — incluida la precedencia del dueño — en el docstring
+        # de utils/dueno_desde_assign.py.
+        "on_change": "frappe_chatwoot.utils.dueno_desde_assign.sincronizar",
+    },
+    # CRM Lead no tenía ningún handler propio. Misma pieza que el Deal: el Round
+    # Robin de Estrublock está sobre los DOS doctypes.
+    "CRM Lead": {
+        "on_change": "frappe_chatwoot.utils.dueno_desde_assign.sincronizar",
     },
     # Solicitud Web → Contacto + CRM Lead. Reemplaza el trigger "Formulario
     # Recibido" de los workflows 1.2 (PVP) y 1.3 (PWP/EGT) de GHL. El handler
