@@ -1545,3 +1545,208 @@ def sin_cfdi(filtro: str = "todas", limit=200) -> list[dict]:
         f["timbrado"] = frappe.utils.flt(f.get("cfdi_total"))
         f["sin_timbrar"] = round(frappe.utils.flt(f["grand_total"]) - f["timbrado"], 2)
     return filas
+
+
+# ===========================================================================
+# Nota de cobro — PDF y envío por correo (paso 9, Bloque 3 del plan
+# `bandeja-colapsable-oportunidades-cobranza.md`)
+# ===========================================================================
+
+PRINT_FORMAT_NOTA = "Nota de cobro"
+
+# Correos que no son de nadie: campos de ejemplo de la migración que quedaron
+# sin sustituir. Constante única y fácil de extender — nunca una lista
+# dispersa por el código (un placeholder que se cuela es un correo de cobranza
+# irreversible a una dirección basura).
+CORREOS_PLACEHOLDER = (
+    "tunombre@gmail.com",
+    "pordefinir@pordefinir.com",
+)
+
+
+def _destinatario_nota(cliente: str) -> str:
+    """Resuelve el correo del cliente con el ÚNICO vínculo confiable de esta
+    base: `Customer.ghl_contact_id` -> `Contact` -> `Contact Email` (primario).
+
+    Ver `cartera_de_contacto`: emparejar por nombre le colgaría los adeudos de
+    un cliente a otro. Sin correo resuelto se levanta error explícito — nunca
+    un destinatario adivinado, porque un correo de cobranza no se puede
+    retractar.
+    """
+    ghl_id = (frappe.db.get_value("Customer", cliente, "ghl_contact_id") or "").strip()
+    if not ghl_id:
+        frappe.throw("Sin correo del cliente: el cliente no tiene contacto vinculado.")
+
+    filas = frappe.db.sql(
+        """
+        SELECT ce.email_id
+        FROM `tabContact Email` ce
+        JOIN `tabContact` c ON c.name = ce.parent
+        WHERE c.ghl_contact_id = %s
+        ORDER BY ce.is_primary DESC, ce.idx ASC
+        LIMIT 1
+        """,
+        ghl_id,
+        as_dict=True,
+    )
+    correo = (filas[0]["email_id"] if filas else "").strip()
+    if not correo:
+        frappe.throw("Sin correo del cliente: el contacto no tiene email registrado.")
+    return correo
+
+
+def _exigir_correo_real(correo: str) -> None:
+    """Rechaza los placeholders conocidos ANTES de enviar — el error dice qué
+    corregir, no solo que falló."""
+    if correo.strip().lower() in {p.strip().lower() for p in CORREOS_PLACEHOLDER}:
+        frappe.throw(
+            f"Correo placeholder ({correo}): corregir en higiene antes de enviar."
+        )
+
+
+def _pdf_nota(doc) -> bytes:
+    """PDF del Print Format `Nota de cobro`, con el fix del puerto 8000.
+
+    POR QUÉ: en una petición HTTP `frappe.utils.get_url()` toma el host de la
+    petición (sofiav2.lavendi.mx) y LE AGREGA el puerto del dev server
+    (`frappe.conf.http_port or webserver_port` = 8000, porque este bench corre
+    con `bench serve`, no con gunicorn+systemd). Con `X-Forwarded-Proto: https`
+    el resultado es `https://sofiav2.lavendi.mx:8000` — un puerto que habla
+    HTTP plano — y wkhtmltopdf muere con `Exit with code 1 due to network
+    error: TimeoutError` al traer el CSS del print (reproducido y confirmado
+    2026-09-23; es también por lo que el endpoint estándar
+    `frappe.utils.print_format.download_pdf` devuelve 500 vía nginx).
+
+    FIX acotado: solo cuando la petición llegó por HTTPS se oculta el puerto
+    durante la generación, para que las URLs queden `https://sofiav2.lavendi.mx`
+    (nginx lo sirve). En contextos sin request (cron, bench execute) o HTTP
+    interno, `http://crm.lavendi.mx:8000` sí es alcanzable y se conserva.
+    """
+    conf = frappe.local.conf
+    quitar_puerto = False
+    try:
+        quitar_puerto = (
+            getattr(frappe.local, "request", None) is not None
+            and (frappe.get_request_header("X-Forwarded-Proto") or "") == "https"
+        )
+    except Exception:
+        quitar_puerto = False
+
+    guardados = {}
+    if quitar_puerto:
+        for k in ("http_port", "webserver_port"):
+            if conf.get(k) is not None:
+                guardados[k] = conf.get(k)
+                conf[k] = None
+    try:
+        return frappe.get_print(
+            doc.doctype, doc.name, print_format=PRINT_FORMAT_NOTA, as_pdf=True
+        )
+    finally:
+        for k, v in guardados.items():
+            conf[k] = v
+
+
+@frappe.whitelist()
+def descargar_nota_cobro(factura: str) -> None:
+    """Descarga el PDF de la Nota de cobro de un cargo.
+
+    Mismo contrato de respuesta que `frappe.utils.print_format.download_pdf`
+    (`filecontent`/`type='pdf'`/`filename`), pero con el fix de puerto de
+    `_pdf_nota`: el endpoint estándar queda inservible vía nginx mientras este
+    bench corra en el puerto 8000 con proto https (ver `_pdf_nota`).
+
+    Gateado por los mismos roles de contabilidad que el resto del módulo.
+    """
+    validate_role()
+
+    doc = frappe.get_doc("Sales Invoice", factura)
+    if doc.docstatus != 1:
+        frappe.throw(
+            "Solo un cargo emitido tiene Nota de cobro (no un borrador ni una "
+            "cancelada)."
+        )
+
+    frappe.local.response.filename = f"nota-de-cobro-{doc.name}.pdf"
+    frappe.local.response.filecontent = _pdf_nota(doc)
+    frappe.local.response.type = "pdf"
+
+
+def _comentario_nota_cobro(factura: str, correo: str) -> None:
+    """Deja rastro en el timeline del cargo: quién envió y a qué correo. El
+    cuándo lo aporta el `creation` del Comment."""
+    frappe.get_doc({
+        "doctype": "Comment",
+        "comment_type": "Info",
+        "reference_doctype": "Sales Invoice",
+        "reference_name": factura,
+        "content": f"Nota de cobro enviada a {correo} por {frappe.session.user}.",
+    }).insert(ignore_permissions=True)
+
+
+@frappe.whitelist()
+def enviar_nota_cobro(factura: str, dry_run: int | str = 0) -> dict:
+    """Genera — y con `dry_run` vacío, envía — la Nota de cobro de un cargo.
+
+    El PDF sale del Print Format `Nota de cobro` (wkhtmltopdf) y se adjunta al
+    correo del outgoing default (`contacto@lavendi.mx` vía Resend). El envío
+    deja Comment en el cargo para auditoría.
+
+    Con `dry_run=1` NO envía nada: genera el PDF y devuelve el destinatario
+    resuelto, para que la UI lo muestre en claro antes de confirmar y para
+    validar la cadena completa (join, Print Format, wkhtmltopdf) sin riesgo.
+
+    Gateado por los mismos roles de contabilidad que el resto del módulo.
+    """
+    validate_role()
+
+    seco = frappe.utils.cint(dry_run)
+    doc = frappe.get_doc("Sales Invoice", factura)
+    if doc.docstatus != 1:
+        frappe.throw(
+            "Solo un cargo emitido tiene Nota de cobro (no un borrador ni una "
+            "cancelada)."
+        )
+
+    correo = _destinatario_nota(doc.customer)
+    _exigir_correo_real(correo)
+
+    # El PDF se genera SIEMPRE, también en seco: valida que el Print Format y
+    # wkhtmltopdf están vivos sin mandar nada a nadie.
+    pdf = _pdf_nota(doc)
+
+    respuesta = {
+        "ok": True,
+        "cargo": doc.name,
+        "cliente": doc.customer_name,
+        "monto": frappe.utils.flt(doc.grand_total),
+        "destinatario": correo,
+        "pdf_generado": bool(pdf),
+    }
+    if seco:
+        respuesta["dry_run"] = True
+        return respuesta
+
+    folio = _folio_ghl(doc.remarks, doc.get("auto_repeat"), doc.name)
+    asunto = f"Nota de cobro — {doc.customer_name}"
+    if folio:
+        asunto += f" (Folio {folio})"
+
+    frappe.sendmail(
+        recipients=[correo],
+        subject=asunto,
+        message=(
+            "<p>Adjuntamos la nota de cobro correspondiente.</p>"
+            "<p style=\"color:#888;font-size:12px\">Este documento no es un "
+            "comprobante fiscal (CFDI).</p>"
+        ),
+        attachments=[{
+            "fname": f"nota-de-cobro-{doc.name}.pdf",
+            "fcontent": pdf,
+        }],
+        reference_doctype=doc.doctype,
+        reference_name=doc.name,
+    )
+    _comentario_nota_cobro(doc.name, correo)
+    frappe.db.commit()
+    return respuesta
