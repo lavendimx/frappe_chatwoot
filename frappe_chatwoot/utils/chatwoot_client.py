@@ -57,6 +57,8 @@ from urllib.parse import unquote, urlparse
 import frappe
 import requests
 
+from frappe_chatwoot.utils import telefono as _telefono
+
 CACHE_PREFIX = "frappe_chatwoot:v1"
 DEFAULT_TTL = 20
 HTTP_TIMEOUT = 15
@@ -399,13 +401,47 @@ def create_contact(*, inbox_id: int, name: str, phone_number: str,
 
     Chatwoot envuelve esto dos veces: {"payload": {"contact": {...}}}. Se
     desenvuelve aquí para que quien llama trabaje siempre con la misma forma
-    que `get_contact`."""
+    que `get_contact`.
+
+    El teléfono se normaliza SOLO cuando llega crudo (10 dígitos locales): se
+    guarda en la forma canónica de WhatsApp MX (`521`+10) para no crear un
+    duplicado del mismo número. Si ya trae lada de país — sobre todo cuando el
+    llamador la resolvió del JID de Evolution, que es la única fuente que sabe
+    si el número lleva el "1" móvil — se respeta tal cual."""
+    if phone_number:
+        limpio = _telefono.digitos(phone_number)
+        if len(limpio) == 10:
+            phone_number = "+" + _telefono.canonico_whatsapp(phone_number)
+        elif not str(phone_number).startswith("+"):
+            phone_number = "+" + limpio
     payload = {"inbox_id": inbox_id, "name": name, "phone_number": phone_number}
     if identifier:
         payload["identifier"] = identifier
     data = _post("/contacts", payload)
     cuerpo = data.get("payload") or data
     return cuerpo.get("contact") or cuerpo
+
+
+def merge_contacts(base_id: int, mergee_id: int) -> dict:
+    """Fusiona dos contactos DUPLICADOS en Chatwoot (endpoint `contact_merge`,
+    disponible desde 4.17.1 — verificado en `app/config/routes.rb`).
+
+    `base` absorbe a `mergee`: las conversaciones y atributos del segundo pasan
+    al primero y el segundo deja de existir. Chatwoot NO borra el duplicado a
+    nivel de contenedor si tenía conversaciones, solo lo vacía; para el CRM es
+    una fusión definitiva.
+
+    ⚠ Irreversible desde Chatwoot. El llamador (`api/panel.fusionar_contactos`)
+    registra la operación en `Chatwoot Fusion` antes de considerarla hecha y
+    evita repetirla contra el mismo par."""
+    data = _post(
+        "/actions/contact_merge",
+        {
+            "base_contact_id": frappe.utils.cint(base_id),
+            "mergee_contact_id": frappe.utils.cint(mergee_id),
+        },
+    )
+    return data.get("payload") or data
 
 
 def create_contact_inbox(*, contact_id: int, inbox_id: int,

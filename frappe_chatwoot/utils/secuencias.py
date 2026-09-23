@@ -1288,7 +1288,8 @@ def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) ->
     Se busca por nombre de contacto (el caso normal: el humano piensa en la
     persona, no en el id del deal), por empresa, teléfono o correo. Devuelve
     `ya_inscrito` cuando se pide una secuencia, para que el diálogo no ofrezca
-    meter dos veces a la misma persona.
+    meter dos veces a la misma persona. Solo marca las inscripciones **Activas**:
+    las `Terminada`/`Salió` no bloquean una reinscripción manual.
     """
     q = (q or "").strip()
     if len(q) < 2:
@@ -1327,9 +1328,15 @@ def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) ->
     )
     inscritos = set()
     if secuencia:
+        # Solo cuentan las inscripciones VIGENTES. Una que terminó o de la que el
+        # contacto salió no debe marcar "ya inscrito": la lista de la pantalla
+        # filtra por `Activa`, y marcar cualquier estado hacía que el diálogo
+        # dijera "Ya inscrito" sobre alguien que la lista no mostraba (el
+        # contacto se podía reinscribir a mano, pero el diálogo lo bloqueaba).
         inscritos = {
             r[0] for r in frappe.db.sql(
-                "SELECT deal FROM `tabSecuencia Inscripcion` WHERE secuencia=%s",
+                "SELECT deal FROM `tabSecuencia Inscripcion` "
+                "WHERE secuencia=%s AND estado='Activa'",
                 secuencia,
             )
         }
@@ -1360,12 +1367,22 @@ def inscribir_deal(secuencia: str, deal: str) -> dict:
     )
     if not d:
         frappe.throw("Esa oportunidad no existe")
+
+    # Solo una inscripción VIGENTE bloquea. Una `Terminada`/`Salió` se reactiva
+    # más abajo — criterio alineado con `buscar_deals` y con la lista, que
+    # filtran por `Activa` (2026-09-23, caso Claudia Gamboa: el diálogo decía
+    # "Ya inscrito" sobre alguien que la lista no mostraba como inscrito).
+    activa = frappe.db.get_value(
+        "Secuencia Inscripcion",
+        {"secuencia": secuencia, "deal": deal, "estado": "Activa"},
+        "name",
+    )
+    if activa:
+        frappe.throw("Esa oportunidad ya está inscrita en esa secuencia")
     existente = frappe.db.get_value(
         "Secuencia Inscripcion", {"secuencia": secuencia, "deal": deal},
-        ["name", "estado"], as_dict=True,
+        ["name", "estado"], as_dict=True, order_by="modified desc",
     )
-    if existente and existente.estado == "Activa":
-        frappe.throw("Esa oportunidad ya está inscrita en esa secuencia")
 
     sec = frappe.get_doc("Secuencia", secuencia).as_dict()
     conv = _conversacion_de(deal, d.contact)

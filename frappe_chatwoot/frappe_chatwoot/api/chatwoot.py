@@ -20,6 +20,9 @@ interactive (view-time) use and avoids a second place drift can occur.
 """
 
 import json
+import os
+import re
+from urllib.parse import unquote, urlparse
 
 import frappe
 
@@ -277,6 +280,130 @@ def send_message(conversation_id: int, content: str, inbox_id: int = None,
             frappe.throw("No se pudieron leer los adjuntos")
 
     return cw.create_message(conversation_id, content, content_attributes=marca)
+
+
+# Firma que el bridge de Evolution antepone al `content` de los mensajes entrantes:
+# `**+52 19932344476 - Zaira Jimenez:**`. Al reenviar a OTRO contacto esa firma
+# revelaría el teléfono y el nombre del contacto original — justo el dato que la
+# confirmación de destinatario del frontend cuida. El patrón es deliberadamente
+# estricto (teléfono + " - " + nombre) para no mutilar un mensaje que empiece con
+# texto en negritas escrito por una persona (`**Importante:** …`).
+_FIRMA_BRIDGE = re.compile(r"^\*\*\s*\+?\d[\d\s\-]{7,}\s*-\s*[^*\n]+:\*\*\s*\n+")
+
+_EXT_MIME = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp",
+    "gif": "image/gif", "pdf": "application/pdf", "mp4": "video/mp4", "mp3": "audio/mpeg",
+    "ogg": "audio/ogg", "wav": "audio/wav", "webm": "video/webm",
+}
+
+
+def _quitar_firma_bridge(content: str) -> str:
+    """Quita la firma del bridge al inicio del `content`, si está. Ver _FIRMA_BRIDGE."""
+    return _FIRMA_BRIDGE.sub("", content or "", count=1)
+
+
+def _ruta_adjunto(data_url: str) -> str | None:
+    """Ruta interna (`/rails/active_storage/...`) a partir del `data_url` de Chatwoot.
+    `fetch_attachment` solo acepta path — nunca URL completa — para no volverse un SSRF."""
+    if not data_url:
+        return None
+    try:
+        return urlparse(data_url).path or None
+    except ValueError:
+        return None
+
+
+def _nombre_adjunto(adjunto: dict, ruta: str) -> str:
+    """Nombre del archivo para el multipart. Chatwoot no guarda el nombre original en
+    el objeto del adjunto: se recupera del final de la URL y, si no trae, se arma con
+    la extensión que sí trae el adjunto."""
+    base = os.path.basename(unquote(ruta or ""))
+    if base:
+        return base
+    ext = (adjunto.get("extension") or "").lower()
+    return f"archivo.{ext}" if ext else "adjunto"
+
+
+@frappe.whitelist()
+def reenviar_mensaje(message_id, conversation_id, conversation_id_destino) -> dict:
+    """Reenvía a OTRA conversación el texto y los adjuntos de un mensaje.
+
+    El mensaje origen se lee de Chatwoot, no se acepta su contenido desde el
+    cliente: la fuente de verdad es el servidor. Chatwoot no expone un GET de un
+    mensaje puntual, pero sí pagina por id — `list_messages(before=message_id+1)`
+    devuelve la página cuyo último elemento (id más alto ≤ message_id) es justo ese
+    mensaje, en una sola llamada.
+
+    Los adjuntos NO se mandan como link: se baja el binario con
+    `chatwoot_client.fetch_attachment` y se resube como media nativa (multipart),
+    mismo criterio que `send_message` — con la URL pegada al texto el destinatario
+    vería un enlace, no la imagen.
+
+    Role-gated only, igual que send_message: un conversation_id no lleva contexto de
+    documento de referencia, así que el binding al CRM lo hace el wrapper del SPA.
+
+    `conversation_id_destino` es un conversation_id de Chatwoot (no un contacto): la
+    búsqueda del destinatario en el frontend reusa `search_conversations`, que ya
+    viene limitado al inbox de este sitio.
+    """
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+
+    msg_id = frappe.utils.cint(message_id)
+    origen_id = frappe.utils.cint(conversation_id)
+    destino_id = frappe.utils.cint(conversation_id_destino)
+    if not msg_id or not destino_id:
+        frappe.throw("Falta el mensaje o la conversación destino")
+    if origen_id and origen_id == destino_id:
+        frappe.throw("El mensaje ya está en esa conversación")
+
+    try:
+        pagina = cw.list_messages(origen_id, before=msg_id + 1)
+    except cw.ChatwootAPIError as exc:
+        frappe.throw(f"No se pudo leer la conversación origen: {exc}")
+
+    origen = next((m for m in (pagina.get("payload") or []) if m.get("id") == msg_id), None)
+    if not origen:
+        frappe.throw("No se encontró el mensaje a reenviar")
+
+    content = _quitar_firma_bridge((origen.get("content") or "").strip())
+    adjuntos = origen.get("attachments") or []
+    if len(adjuntos) > MAX_ADJUNTOS:
+        frappe.throw(f"El mensaje tiene más de {MAX_ADJUNTOS} adjuntos y no se puede reenviar completo")
+    if not content and not adjuntos:
+        frappe.throw("El mensaje no tiene contenido que reenviar")
+
+    archivos = []
+    for a in adjuntos:
+        ruta = _ruta_adjunto(a.get("data_url"))
+        if not ruta:
+            continue
+        try:
+            datos, content_type = cw.fetch_attachment(ruta)
+        except cw.ChatwootAPIError:
+            continue
+        mime = content_type or a.get("content_type") or _EXT_MIME.get((a.get("extension") or "").lower())
+        archivos.append((_nombre_adjunto(a, ruta), datos, mime))
+
+    # El origen tenía adjuntos y no se pudo bajar ninguno: NO reenviar solo el texto
+    # a medias — el destinatario recibiría un mensaje incompleto sin saberlo.
+    if adjuntos and not archivos:
+        frappe.throw("No se pudieron descargar los adjuntos del mensaje")
+
+    marca = autoria.marca_humana()
+    if archivos:
+        creado = cw.create_message_with_attachments(
+            destino_id, content, archivos=archivos, content_attributes=marca)
+    else:
+        creado = cw.create_message(destino_id, content, content_attributes=marca)
+
+    return {
+        "ok": True,
+        "message_id": creado.get("id"),
+        "send_failed": bool(creado.get("send_failed")),
+        "send_error": creado.get("send_error"),
+    }
 
 
 def _pause_conversation(conversation_id: int, inbox_id: int = None) -> None:
