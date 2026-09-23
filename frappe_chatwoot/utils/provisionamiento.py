@@ -36,6 +36,12 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    el login de un usuario de ventas cae en `/apps` (el conmutador) en vez del
    CRM. Aqui se fija en `crm` si esta vacio.
 
+7. **Print Formats de Cobranza**: la "Nota de cobro" (Sales Invoice) se creo
+   directo en la BD de crm.lavendi.mx (2026-09-23) y no viaja por fixture. Se
+   siembra UNA VEZ por sitio (mismo patron que los catalogos): como fixture
+   re-imponeria el branding de lavendi.mx en CADA migrate sobre cualquier
+   edicion que el cliente haga a su propia nota.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
@@ -118,6 +124,7 @@ def ajustar_sitio():
     """Punto de entrada de `after_migrate`. Nunca lanza."""
     for paso in (
         sembrar_catalogos_una_vez,
+        sembrar_print_formats_una_vez,
         aplicar_fixtures_erpnext,
         deduplicar_web_form_fields,
         _branding_plataforma,
@@ -172,6 +179,52 @@ def sembrar_catalogos_una_vez():
     _borrar_etapas_nativas()
     _corregir_typo()
     frappe.db.set_default(BANDERA_CATALOGOS, "1")
+
+
+BANDERA_PRINT_FORMATS = "fc_print_formats_sembrados"
+
+
+def sembrar_print_formats_una_vez():
+    """Siembra los Print Formats de Cobranza (hoy: "Nota de cobro" de Sales
+    Invoice, `fixtures/print_formats/`) — UNA SOLA VEZ por sitio.
+
+    Mismo patron y misma razon que `sembrar_catalogos_una_vez`: el formato nacio
+    directo en la BD de crm.lavendi.mx (2026-09-23) y como fixture re-imponeria
+    el branding de lavendi.mx en CADA `bench migrate` sobre la nota que el
+    cliente ya haya personalizado (es su cara ante su propio cliente final).
+
+    Dos guardas: exige erpnext (Sales Invoice es de Accounts — en un sitio sin
+    erpnext no hay nada que sembrar), y si el sitio ya trae un Print Format con
+    el mismo nombre NO se pisa — se marca la bandera igual, porque `import_doc`
+    importa con `force=True` (sobrescribe por nombre).
+
+    Para re-sembrar a mano un sitio concreto:
+        frappe.db.set_default("fc_print_formats_sembrados", "")  # y correr ajustar_sitio()
+    """
+    if "erpnext" not in frappe.get_installed_apps():
+        return
+    if frappe.db.get_default(BANDERA_PRINT_FORMATS):
+        return
+
+    ruta = os.path.join(frappe.get_app_path("frappe_chatwoot"), "fixtures", "print_formats")
+    if os.path.isdir(ruta):
+        nombres = []
+        for f in os.listdir(ruta):
+            if not f.endswith(".json"):
+                continue
+            with open(os.path.join(ruta, f)) as fh:
+                for r in json.load(fh):
+                    if r.get("name"):
+                        nombres.append(r["name"])
+        if any(frappe.db.exists("Print Format", n) for n in nombres):
+            frappe.db.set_default(BANDERA_PRINT_FORMATS, "1")
+            return
+
+        from frappe.core.doctype.data_import.data_import import import_doc
+
+        import_doc(ruta)
+
+    frappe.db.set_default(BANDERA_PRINT_FORMATS, "1")
 
 
 def _borrar_etapas_nativas():
