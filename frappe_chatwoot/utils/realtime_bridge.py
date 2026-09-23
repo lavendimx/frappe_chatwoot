@@ -135,6 +135,13 @@ def poll_and_broadcast():
         last_seen.update(changed)
         # Same v15 shadowing trap as the read cache — see cw._set_cached.
         cw._set_cached(_SNAPSHOT_CACHE_KEY, last_seen, 86400)
+        # Drop the cached conversation/message pages so the refetch this
+        # broadcast triggers reads fresh data instead of a stale 20 s cache
+        # hit. The webhook path already does this (api/chatwoot.py).
+        try:
+            cw.clear_cache()
+        except Exception:
+            pass
 
 
 def _broadcast_conversation_update(conversation: dict):
