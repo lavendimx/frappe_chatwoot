@@ -1734,6 +1734,7 @@ def enviar_nota_cobro(factura: str, dry_run: int | str = 0) -> dict:
 
     frappe.sendmail(
         recipients=[correo],
+        cc=["alejandro.moreno@lavendi.mx", "valente.flores@lavendi.mx"],
         subject=asunto,
         message=(
             "<p>Adjuntamos la nota de cobro correspondiente.</p>"
