@@ -156,6 +156,39 @@ DELAY_ENTRE_ENVIOS_SEG = (60, 120)
 # workflow «8. Salida por Venta Ganada».
 ESTADOS_QUE_SACAN = ("won", "lost", "abandoned")
 
+# Cuánto se espera cuando el contacto respondió (2026-09-24, decisión de
+# Alejandro: "una respuesta no debería sacarlos de la secuencia"). Antes una
+# respuesta significaba SALIDA definitiva — el prospecto quedaba fuera para
+# siempre y nadie lo reinscribía; así se perdieron Angie, Fernanda Castillo y
+# Mariana Ortega el 23-sep, inscritas y expulsadas en el mismo microsegundo.
+# Ahora la conversación viva solo POSPONE: no se le escribe encima mientras
+# está hablando con un humano, y vuelve a la cola cuando se enfría. Esto
+# también cierra el defecto inverso (Manuel Moctezuma, conv 357): la secuencia
+# empujaba plantillas a alguien que llevaba 15 h esperando respuesta humana.
+ESPERA_TRAS_RESPUESTA_HORAS = 48
+
+
+def _fue_omitido(nota: str | None) -> bool:
+    """¿El paso de envío se saltó en vez de mandarse?
+
+    `_ejecutar_paso` devuelve una nota de texto y NUNCA lanza cuando falta el
+    canal: sin correo, sin teléfono o sin inbox devuelve "... omitido (...)".
+    El motor trataba esa nota igual que un envío real — marcaba
+    `ultimo_envio_at` y avanzaba `paso_actual`, así que un paso sin canal
+    quedaba registrado como entregado, sin rastro (auditoría 2026-09-24:
+    19 emails y 8 WhatsApp fantasma, y la secuencia COMPLETA de Christian
+    Enríquez dada por "Terminada" 30/30 sin un solo mensaje real).
+
+    Avanzar el paso sigue siendo correcto —si el contacto no tiene correo, el
+    email se omite y el WhatsApp de esa misma ronda sí sale; atorar la
+    inscripción sería peor—. Lo que se corrige es fingir el envío.
+
+    ⚠ Se ancla al PREFIJO, no a la palabra suelta: "whatsapp enviado (adjunto
+    no disponible, omitido)" es un envío REAL al que solo le faltó el archivo
+    —el mensaje sí llegó— y buscar "omitido" en cualquier parte lo contaba
+    como fantasma."""
+    return (nota or "").strip().lower().startswith(("email omitido", "whatsapp omitido"))
+
 
 def _activo() -> bool:
     return bool(
@@ -788,6 +821,37 @@ def _avisar_respondio(ins: dict) -> None:
         frappe.log_error(f"secuencia {ins.get('name')}: aviso de respuesta: {exc}", "Secuencias")
 
 
+def _avisar_omitido(ins: dict, paso: dict, nota: str) -> None:
+    """Avisa que un paso de envío se omitió por falta de canal.
+
+    Prevención (2026-09-24, a pedido de Alejandro tras el caso Christian
+    Enríquez: 30/30 pasos "Terminada" sin un solo mensaje real, y nadie se
+    enteró hasta la auditoría). `_fue_omitido` + el `frappe.log_error` de
+    `avanzar()`/`forzar_paso()` ya corrigen la MENTIRA (ya no se marca como
+    enviado) pero siguen siendo silenciosos — nadie va a leer el Error Log
+    para enterarse de que un contacto se está quedando sin secuencia real.
+    Mismo patrón que `_avisar_respondio`: `CRM Notification` in-app (ver la
+    nota "PENDIENTE DE DECISIÓN HUMANA" del docstring del módulo sobre por
+    qué no es WhatsApp/correo todavía). Best-effort: una falla aquí nunca
+    debe bloquear el avance del paso."""
+    try:
+        deal_owner = frappe.db.get_value("CRM Deal", ins["deal"], "deal_owner")
+        mensaje = (f"{ins['deal']}: paso de {paso.get('tipo')} omitido en seguimiento "
+                   f"automático — {nota}. Revisar el correo/teléfono del contacto.")
+        frappe.get_doc({
+            "doctype": "CRM Notification",
+            "from_user": frappe.session.user,
+            "to_user": deal_owner or frappe.session.user,
+            "type": "Mention",
+            "message": mensaje,
+            "notification_text": mensaje,
+            "reference_doctype": "CRM Deal",
+            "reference_name": ins["deal"],
+        }).insert(ignore_permissions=True)
+    except Exception as exc:
+        frappe.log_error(f"secuencia {ins.get('name')}: aviso de omitido: {exc}", "Secuencias")
+
+
 def _detalle_paso(ins: dict, paso: dict, sec: dict) -> str:
     """Texto para el tooltip de la burbuja: qué secuencia y qué paso la mandó.
     `paso_actual` es base 0 sobre la lista de pasos, así que el humano ve +1."""
@@ -1012,8 +1076,8 @@ def _debe_salir(ins: dict) -> str | None:
             ["name", "contacto"], as_dict=True,
         )
         if hermana:
-            return (f"otro contacto de la oportunidad respondió "
-                    f"({hermana.contacto or hermana.name})")
+            # Ya no SACA: espera, igual que la respuesta propia (ver abajo).
+            return "__esperar_humano__"
 
     if sec and ins.get("ultimo_envio_at") and ins.get("conversation_id"):
         try:
@@ -1033,7 +1097,11 @@ def _debe_salir(ins: dict) -> str | None:
                                         "ultimo_mensaje_cliente_at", creado,
                                         update_modified=False)
                     _avisar_respondio(ins)
-                    return "el contacto respondió"
+                    # NO saca (2026-09-24). Responder significa interés, no
+                    # baja: el prospecto se queda en la secuencia y solo se
+                    # pospone mientras la conversación está viva. Ver
+                    # ESPERA_TRAS_RESPUESTA_HORAS.
+                    return "__esperar_humano__"
                 break
         except Exception as exc:
             # Que Chatwoot no responda NO debe sacar a nadie de la secuencia,
@@ -1089,10 +1157,19 @@ def avanzar():
                                 update_modified=False)
             pospuestos += 1
             continue
+        if motivo == "__esperar_humano__":
+            # El contacto (o su socio en el mismo deal) escribió después de
+            # nuestro último envío. Se pospone, NO se saca.
+            frappe.db.set_value(
+                "Secuencia Inscripcion", ins.name, "proximo_en",
+                _siguiente_hueco(sec, frappe.utils.add_to_date(
+                    ahora, hours=ESPERA_TRAS_RESPUESTA_HORAS)),
+                update_modified=False)
+            pospuestos += 1
+            continue
         if motivo:
             _set_ins(ins.name, {
-                "estado": "Salió por respuesta" if "respondió" in motivo
-                          else "Salió por cambio de etapa",
+                "estado": "Salió por cambio de etapa",
                 "motivo": motivo,
             }, update_modified=False)
             salidas.append((ins.name, motivo))
@@ -1133,13 +1210,24 @@ def avanzar():
             frappe.log_error(f"secuencia {ins.name} paso {siguiente + 1}: {exc}", "Secuencias")
             continue
 
-        if paso.get("tipo") == "WhatsApp":
+        # Un paso de envío que se saltó por falta de canal NO es un envío: no
+        # consume cupo de ráfaga, no gasta el delay anti-baneo y —sobre todo—
+        # no mueve `ultimo_envio_at`. Ver `_fue_omitido`.
+        omitido = es_envio and _fue_omitido(nota)
+        if omitido:
+            frappe.log_error(
+                f"secuencia {ins.name} paso {siguiente + 1} ({paso.get('tipo')}): {nota}",
+                "Secuencias — paso omitido sin canal",
+            )
+            _avisar_omitido(dict(ins), paso, nota)
+
+        if paso.get("tipo") == "WhatsApp" and not omitido:
             envios_whatsapp_en_corrida += 1
 
         espera = frappe.utils.cint(paso.get("espera_minutos"))
         proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(ahora, minutes=espera or 1))
         cambios = {"paso_actual": siguiente + 1, "proximo_en": proximo}
-        if es_envio:
+        if es_envio and not omitido:
             cambios["ultimo_envio_at"] = ahora
         _set_ins(ins.name, cambios, update_modified=False)
         # Commit por paso (2026-09-22): antes se commiteaba una sola vez al final
@@ -1154,7 +1242,7 @@ def avanzar():
         # un "Esperar" gastaban plaza y dejaban sin turno a los que sí mandan
         # mensaje (medido 2026-09-22: las 2 plazas/hora se agotaron en pasos
         # internos y 26 vencidas nunca salieron).
-        if es_envio:
+        if es_envio and not omitido:
             sec["_hechos"] = sec.get("_hechos", 0) + 1
         hechos.append((ins.name, siguiente + 1, nota))
 
@@ -1525,6 +1613,18 @@ def forzar_paso(inscripcion: str) -> dict:
 
     No aplica el delay de ráfaga (`DELAY_ENTRE_ENVIOS_SEG`): es un solo mensaje
     disparado por una persona, no una corrida de hasta 20.
+
+    ENCADENA pasos internos (root-fix 2026-09-24, tres incidentes idénticos:
+    Rocío Rivera 17-sep, LEON y Elisa Flores 24-sep). "Esperar", "Actualizar
+    oportunidad", "Nota interna", "Aviso al equipo", "Tarea" y "Etiqueta" no
+    le mandan nada al contacto; forzar uno de esos avanzaba el puntero y
+    devolvía un toast mudo, y quien apretó el botón —sin ver el código— no
+    tenía forma de saber que hacía falta un SEGUNDO click para el envío real.
+    Ahora un solo click corre todos los pasos internos consecutivos y se
+    detiene en el primer WhatsApp/Email realmente enviado (no un omitido por
+    falta de canal) o al llegar al final de la secuencia. Cada vuelta vuelve a
+    evaluar `_debe_salir`: si el contacto responde a mitad del encadenado, se
+    detiene ahí — mismo criterio que ya aplica `avanzar()` paso a paso.
     """
     _exigir_edicion()
     ins = frappe.db.get_value(
@@ -1539,70 +1639,119 @@ def forzar_paso(inscripcion: str) -> dict:
         return {"ok": False, "mensaje": f"La inscripción no está activa ({ins.estado})"}
 
     sec = frappe.get_doc("Secuencia", ins.secuencia).as_dict()
-
-    motivo = _debe_salir(dict(ins))
-    if motivo == "__posponer__":
-        return {"ok": False,
-                "mensaje": "No se pudo verificar si el contacto respondió (Chatwoot no "
-                           "respondió). Intenta de nuevo."}
-    if motivo:
-        _set_ins(ins.name, {
-            "estado": "Salió por respuesta" if "respondió" in motivo
-                      else "Salió por cambio de etapa",
-            "motivo": motivo,
-        }, update_modified=False)
-        frappe.db.commit()
-        return {"ok": False, "salio": True, "mensaje": f"Se detuvo: {motivo}"}
-
     pasos = sec.get("pasos") or []
-    i = frappe.utils.cint(ins.paso_actual)
-    if i >= len(pasos):
-        _set_ins(ins.name, {"estado": "Terminada", "motivo": "secuencia completa"},
-                 update_modified=False)
-        frappe.db.commit()
-        return {"ok": False, "mensaje": "La secuencia ya está completa"}
 
-    paso = pasos[i]
-    paso = paso if isinstance(paso, dict) else paso.as_dict()
-    try:
-        nota = _ejecutar_paso(dict(ins), paso, sec)
-    except Exception as exc:
-        _set_ins(ins.name, {
-            "estado": "Error", "motivo": f"paso {i + 1}: {exc}"[:500],
-        }, update_modified=False)
-        frappe.db.commit()
-        frappe.log_error(f"secuencia {ins.name} forzado paso {i + 1}: {exc}", "Secuencias")
-        return {"ok": False, "error": str(exc)[:300],
-                "mensaje": f"El paso {i + 1} falló: {exc}"}
+    cadena = []  # [(num_paso, tipo, nota)] — todo lo que este click sí ejecutó
+    i_final = None
+    detenido = None  # por qué se cortó el encadenado antes de un envío real
 
-    # Forzar un paso "Esperar" debe saltarse también SU PROPIA espera: es
-    # el paso que representa "no hacer nada N minutos", y la persona que
-    # fuerza está pidiendo justamente lo contrario. Sin esto, forzar el
-    # primer paso de una secuencia (típicamente "Esperar 2 días") reaplicaba
-    # la espera completa sobre el paso siguiente — el forzado no adelantaba
-    # nada, solo reiniciaba el mismo conteo (caso real: Rocío Rivera, 17-sep).
-    es_espera = paso.get("tipo") == "Esperar"
-    espera = 0 if es_espera else frappe.utils.cint(paso.get("espera_minutos"))
-    proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(_ahora(), minutes=espera or 1))
-    cambios = {"paso_actual": i + 1, "proximo_en": proximo}
-    if paso.get("tipo") in ("WhatsApp", "Email"):
-        cambios["ultimo_envio_at"] = _ahora()
-    _set_ins(ins.name, cambios, update_modified=False)
-    frappe.db.commit()
+    while True:
+        motivo = _debe_salir(dict(ins))
+        if motivo == "__posponer__":
+            if cadena:
+                detenido = ("no se pudo confirmar si el contacto respondió; se detiene "
+                            "aquí, intenta de nuevo para seguir")
+                break
+            return {"ok": False,
+                    "mensaje": "No se pudo verificar si el contacto respondió (Chatwoot no "
+                               "respondió). Intenta de nuevo."}
+        if motivo == "__esperar_humano__":
+            # Forzar NO se salta esta salvaguarda: el contacto está en conversación
+            # viva. Ya no lo SACA de la secuencia (2026-09-24), solo se niega a
+            # escribirle encima; quien fuerza puede insistir después.
+            if cadena:
+                detenido = "el contacto respondió; no se le manda el resto de la cadena"
+                break
+            return {"ok": False, "espera": True,
+                    "mensaje": "El contacto escribió después del último envío: sigue en la "
+                               "secuencia, pero no se le manda nada mientras la conversación "
+                               "esté viva."}
+        if motivo:
+            _set_ins(ins.name, {
+                "estado": "Salió por cambio de etapa",
+                "motivo": motivo,
+            }, update_modified=False)
+            frappe.db.commit()
+            if cadena:
+                detenido = f"se detuvo: {motivo}"
+                break
+            return {"ok": False, "salio": True, "mensaje": f"Se detuvo: {motivo}"}
+
+        i = frappe.utils.cint(ins.paso_actual)
+        if i >= len(pasos):
+            _set_ins(ins.name, {"estado": "Terminada", "motivo": "secuencia completa"},
+                     update_modified=False)
+            frappe.db.commit()
+            if cadena:
+                break
+            return {"ok": False, "mensaje": "La secuencia ya está completa"}
+
+        paso = pasos[i]
+        paso = paso if isinstance(paso, dict) else paso.as_dict()
+        try:
+            nota = _ejecutar_paso(dict(ins), paso, sec)
+        except Exception as exc:
+            _set_ins(ins.name, {
+                "estado": "Error", "motivo": f"paso {i + 1}: {exc}"[:500],
+            }, update_modified=False)
+            frappe.db.commit()
+            frappe.log_error(f"secuencia {ins.name} forzado paso {i + 1}: {exc}", "Secuencias")
+            if cadena:
+                detenido = f"el paso {i + 1} falló: {exc}"
+                break
+            return {"ok": False, "error": str(exc)[:300],
+                    "mensaje": f"El paso {i + 1} falló: {exc}"}
+
+        # Forzar un paso "Esperar" debe saltarse también SU PROPIA espera: es
+        # el paso que representa "no hacer nada N minutos", y la persona que
+        # fuerza está pidiendo justamente lo contrario. Sin esto, forzar el
+        # primer paso de una secuencia (típicamente "Esperar 2 días") reaplicaba
+        # la espera completa sobre el paso siguiente — el forzado no adelantaba
+        # nada, solo reiniciaba el mismo conteo (caso real: Rocío Rivera, 17-sep).
+        es_espera = paso.get("tipo") == "Esperar"
+        espera = 0 if es_espera else frappe.utils.cint(paso.get("espera_minutos"))
+        proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(_ahora(), minutes=espera or 1))
+        cambios = {"paso_actual": i + 1, "proximo_en": proximo}
+        es_envio = paso.get("tipo") in ("WhatsApp", "Email")
+        # Mismo criterio que `avanzar()`: un envío omitido por falta de canal no
+        # es un envío y no debe mover `ultimo_envio_at`. Ver `_fue_omitido`.
+        omitido = es_envio and _fue_omitido(nota)
+        if omitido:
+            frappe.log_error(
+                f"secuencia {ins.name} forzado paso {i + 1} ({paso.get('tipo')}): {nota}",
+                "Secuencias — paso omitido sin canal",
+            )
+            # El toast ya se lo dice a quien forzó (nota_final abajo), pero el
+            # deal_owner puede ser otra persona — mismo aviso que en avanzar().
+            _avisar_omitido(dict(ins), paso, nota)
+        if es_envio and not omitido:
+            cambios["ultimo_envio_at"] = _ahora()
+        _set_ins(ins.name, cambios, update_modified=False)
+        frappe.db.commit()
+
+        cadena.append((
+            i + 1, paso.get("tipo"),
+            "Espera saltada, sin envío." if es_espera else nota,
+        ))
+        i_final = i
+        ins.paso_actual = i + 1
+
+        if es_envio and not omitido:
+            break  # envío real: el encadenado para aquí, no sigue solo
+        # paso interno (o envío omitido por falta de canal): se sigue encadenando
 
     siguiente = "Completada"
-    if i + 1 < len(pasos):
-        p = pasos[i + 1]
+    if i_final is not None and i_final + 1 < len(pasos):
+        p = pasos[i_final + 1]
         p = p if isinstance(p, dict) else p.as_dict()
         siguiente = p.get("nombre_ghl") or p.get("tipo") or "Completada"
 
-    if es_espera:
-        # `_ejecutar_paso` no manda nada para "Esperar" y regresa la nota
-        # muda "espera" — sin esto el toast de éxito no explica que no se
-        # envió ningún mensaje.
-        nota = f"Espera saltada, sin envío. Listo para: {siguiente}."
+    nota_final = (cadena[0][2] if len(cadena) == 1
+                  else " → ".join(f"paso {n} ({t}): {txt}" for n, t, txt in cadena))
+    if detenido:
+        nota_final += f" — {detenido}"
 
     return {
-        "ok": True, "nota": nota, "paso": i + 1, "total_pasos": len(pasos),
+        "ok": True, "nota": nota_final, "paso": (i_final or 0) + 1, "total_pasos": len(pasos),
         "siguiente_paso": siguiente,
     }
