@@ -13,6 +13,9 @@
   "column_break_main",
   "default_inbox_id",
   "cache_ttl_seconds",
+  "section_break_meta",
+  "fb_app_id",
+  "fb_api_version",
   "section_break_realtime",
   "webhook_token",
   "pubsub_token"
@@ -32,7 +35,7 @@
    "mandatory_depends_on": "eval:doc.enabled"
   },
   {
-   "description": "User Access Token for a dedicated service agent (NOT the bot token or platform token \u2014 both are rejected by conversation read endpoints). Sent as the api_access_token header.",
+   "description": "User Access Token for a dedicated service agent (NOT the bot token or platform token — both are rejected by conversation read endpoints). Sent as the api_access_token header.",
    "fieldname": "api_token",
    "fieldtype": "Password",
    "label": "API Token",
@@ -58,7 +61,7 @@
   },
   {
    "default": "20",
-   "description": "Self-imposed cache TTL for live Chatwoot reads (Chatwoot exposes no rate-limit headers \u2014 see README). Applies to conversation list/detail and message list reads.",
+   "description": "Self-imposed cache TTL for live Chatwoot reads (Chatwoot exposes no rate-limit headers — see README). Applies to conversation list/detail and message list reads.",
    "fieldname": "cache_ttl_seconds",
    "fieldtype": "Int",
    "label": "Cache TTL (seconds)"
@@ -81,6 +84,24 @@
    "hidden": 1,
    "label": "Pubsub Token (cached)",
    "read_only": 1
+  },
+  {
+   "fieldname": "section_break_meta",
+   "fieldtype": "Section Break",
+   "label": "Messaging (Meta)"
+  },
+  {
+   "description": "Facebook App ID de la app de Meta de este CRM (Sofía CRM - lavendi.mx). Es PUBLICO: lo usa el JS SDK en el navegador para conectar paginas. La clave secreta NO vive aqui, vive en Chatwoot.",
+   "fieldname": "fb_app_id",
+   "fieldtype": "Data",
+   "label": "Facebook App ID"
+  },
+  {
+   "default": "v22.0",
+   "description": "Version de la Graph API que usa el JS SDK de Facebook.",
+   "fieldname": "fb_api_version",
+   "fieldtype": "Data",
+   "label": "Facebook API Version"
   }
  ],
  "grid_page_length": 50,
