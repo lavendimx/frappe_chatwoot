@@ -33,10 +33,14 @@ ALLOWED_ROLES = ["System Manager", "Accounts Manager", "Accounts User", "Sales M
 ROL_CANCELACION = "Autorizador Cobranza"
 
 # Los filtros que el equipo realmente pide, no los 7 status de ERPNext.
+# `canceladas` es de docstatus=2 (ver `listar`) — nunca se mezcla con las demás,
+# que son docstatus=1: un cargo anulado dejaría de "estar por cobrar" o "pagado"
+# a la vez, así que necesita su propia pestaña en vez de sumarse a "todas".
 FILTROS = {
     "por_cobrar": ["Overdue", "Unpaid", "Partly Paid"],
     "vencidas": ["Overdue"],
     "pagadas": ["Paid"],
+    "canceladas": ["Cancelled"],
     "todas": None,
 }
 
@@ -160,7 +164,12 @@ def listar(filtro: str = "por_cobrar", q: str = "", limit=200) -> list[dict]:
     if filtro not in FILTROS:
         frappe.throw("filtro inválido")
 
-    condiciones = ["si.docstatus = 1"]
+    # `canceladas` vive en docstatus=2 — el resto de las pestañas son docstatus=1
+    # (documento vigente); mezclar ambos en una sola condición base confundiría
+    # "vencida" con "anulada" (ERPNext no reutiliza `status='Overdue'` en un doc
+    # cancelado, pero el filtro por docstatus es la guarda explícita, no un
+    # supuesto sobre cómo se comporta `status`).
+    condiciones = ["si.docstatus = 2"] if filtro == "canceladas" else ["si.docstatus = 1"]
     valores: dict = {}
 
     estados = FILTROS[filtro]
@@ -175,14 +184,22 @@ def listar(filtro: str = "por_cobrar", q: str = "", limit=200) -> list[dict]:
         )
         valores["q"] = f"%{q}%"
 
-    orden = "si.due_date ASC" if filtro in ("por_cobrar", "vencidas") else "si.posting_date DESC"
+    if filtro in ("por_cobrar", "vencidas"):
+        orden = "si.due_date ASC"
+    elif filtro == "canceladas":
+        # Lo último anulado primero — es lo que alguien viene a auditar.
+        orden = "si.modified DESC"
+    else:
+        orden = "si.posting_date DESC"
     valores["limite"] = frappe.utils.cint(limit) or 200
 
     filas = frappe.db.sql(
         f"""
         SELECT si.name, si.customer, si.customer_name, si.posting_date, si.due_date,
                si.grand_total, si.outstanding_amount, si.status, si.currency, si.remarks,
-               si.auto_repeat, si.cfdi_total, si.cfdi_metodo_pago
+               si.auto_repeat, si.cfdi_total, si.cfdi_metodo_pago,
+               si.motivo_cancelacion, si.modified AS cancelado_en,
+               si.modified_by AS cancelado_por
         FROM `tabSales Invoice` si
         WHERE {' AND '.join(condiciones)}
         ORDER BY {orden}
@@ -201,11 +218,18 @@ def listar(filtro: str = "por_cobrar", q: str = "", limit=200) -> list[dict]:
             f.pop("remarks", None), f.get("auto_repeat"), f["name"], moldes
         )
         f["recurrente"] = bool(f.get("auto_repeat"))
+        if filtro != "canceladas":
+            f.pop("motivo_cancelacion", None)
+            f.pop("cancelado_en", None)
+            f.pop("cancelado_por", None)
         # Días de atraso: dato que ERPNext no muestra en su lista y es lo primero
-        # que se pregunta al llamar a cobrar.
+        # que se pregunta al llamar a cobrar. No aplica a un cargo anulado —
+        # `outstanding_amount` no se recalcula al cancelar, así que sin este
+        # guard un cargo cancelado se vería "vencido hace N días", que confunde
+        # más que ayuda (ya no se cobra, esté o no marcado como pagado).
         f["dias_vencida"] = (
             frappe.utils.date_diff(hoy, f["due_date"])
-            if f["due_date"] and float(f["outstanding_amount"]) > 0.009
+            if filtro != "canceladas" and f["due_date"] and float(f["outstanding_amount"]) > 0.009
             else 0
         )
         if f["dias_vencida"] < 0:
@@ -267,6 +291,12 @@ def detalle(factura: str) -> dict:
         # El frontend muestra el botón "Cancelar" solo si esto es true; el
         # backend lo vuelve a validar en `cancelar_factura`.
         "puede_cancelar": _puede_cancelar(),
+        # Quién y por qué anuló, si aplica. `modified_by`/`modified` del propio
+        # documento son la fuente — `doc.cancel()` los actualiza al usuario y al
+        # instante de la cancelación, igual que cualquier otro guardado.
+        "motivo_cancelacion": doc.get("motivo_cancelacion") if doc.docstatus == 2 else None,
+        "cancelado_por": doc.modified_by if doc.docstatus == 2 else None,
+        "cancelado_en": doc.modified if doc.docstatus == 2 else None,
     }
 
 
@@ -415,6 +445,24 @@ def cancelar_factura(factura: str, motivo: str) -> dict:
                             motivo, update_modified=False)
     _comentario_cancelacion(factura, motivo)
     frappe.db.commit()
+
+    # Aviso móvil (2026-09-24, pedido de Alejandro): anular un cargo debe
+    # notificar a quien más puede autorizar cobranza, no solo quedar en el
+    # timeline de la factura. Best-effort DESPUÉS del commit — un push caído
+    # nunca debe deshacer una cancelación ya válida y registrada.
+    try:
+        from frappe_chatwoot.frappe_chatwoot.api.push import notify_roles
+        folio = _folio_ghl(doc.remarks, doc.get("auto_repeat"), doc.name) or factura
+        notify_roles(
+            [ROL_CANCELACION, "System Manager"],
+            title="Factura cancelada",
+            body=f"{frappe.session.user} canceló {folio} — {motivo}",
+            url="/crm/facturacion",
+            tag=f"factura-cancelada-{factura}",
+        )
+    except Exception:
+        frappe.log_error(title="facturacion: push cancelacion",
+                          message=frappe.get_traceback())
 
     return {
         "ok": True,
