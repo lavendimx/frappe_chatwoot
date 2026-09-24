@@ -36,6 +36,8 @@ def get_active_agentes() -> dict:
             "calendar_id",
             "shadow_mode",
             "gate_intencion",
+            "pausar_ante_intervencion_humana",
+            "minutos_pausa_humana",
         ],
     )
     return {
@@ -49,6 +51,13 @@ def get_active_agentes() -> dict:
             # Sofía Lite: el número del cliente también recibe proveedores, personal y
             # vecinos. Apagado por default — los inboxes que ya existen no cambian.
             "gateIntencion": bool(row.gate_intencion),
+            # Pausa configurable por intervención humana (antes fija/indefinida).
+            # `pausarAnteIntervencionHumana=False` equivale a que agente-ia (host)
+            # no pause al ver un saliente humano; `minutosPausaHumana` es cuánto
+            # dura esa pausa antes de que el job de expiración (utils/pausas.py)
+            # la levante sola.
+            "pausarAnteIntervencionHumana": bool(row.pausar_ante_intervencion_humana),
+            "minutosPausaHumana": frappe.utils.cint(row.minutos_pausa_humana) or 90,
         }
         for row in rows
     }

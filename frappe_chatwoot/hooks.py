@@ -107,6 +107,16 @@ scheduler_events = {
         "*/20 8-18 * * 1-5": [
             "frappe_chatwoot.utils.autofollowup.barrer",
         ],
+        # Auto-expirar pausas humanas de `Chatwoot Pausa` — hasta hoy solo se
+        # levantaban a mano (botón "Reanudar agente"). `expirar_pausas()` sale
+        # en la primera línea si `Chatwoot Settings.expirar_pausas_activo` está
+        # en 0 (nace apagado — ver docstring de utils/pausas.py, hay pausas
+        # reales acumuladas que no deben resucitar de golpe). Cada 5 min, no
+        # menos: los minutos configurables (`Agente IA.minutos_pausa_humana`)
+        # son enteros, un barrido más fino no aporta precisión real.
+        "*/5 * * * *": [
+            "frappe_chatwoot.utils.pausas.expirar_pausas",
+        ],
     },
 }
 
@@ -264,6 +274,10 @@ DOCTYPES_PROPIOS = [
     # campanas-contenedor-y-cadencia.md): contenedor + pasos con cadencia.
     "Campana Email",
     "Campana Email Paso",
+    # Redes sociales vía Ayrshare (2026-09-24): perfil de Ayrshare de este
+    # sitio (API key + Profile Key) para conectar Instagram/Facebook/etc.
+    # sin salir del CRM. Single, como Stripe Settings.
+    "Redes Sociales",
 ]
 
 # Doctypes de terceros (crm) que extendimos con campos propios.
