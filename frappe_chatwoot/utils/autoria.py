@@ -35,6 +35,7 @@ ORIGENES = {
     "recordatorio": "Recordatorio",
     "onboarding": "Onboarding",
     "bienvenida": "Bienvenida",
+    "followup": "Reactivación",
 }
 
 

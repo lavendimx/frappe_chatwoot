@@ -94,6 +94,19 @@ scheduler_events = {
         "0 8 * * 1-5": [
             "frappe_chatwoot.utils.facturas_vencidas.avisar_vencidas",
         ],
+        # Autofollowup — reactivación de hilos de prospecto dejados en visto,
+        # réplica del bot action `advancedFollowup` de GHL Conversation AI.
+        # Plan: nuevosofia/planes/autofollowup-reactivacion-conversaciones.md.
+        # Cron propio (NO el de `secuencias.avanzar`, más arriba): el primer
+        # paso dispara a +3h del silencio, así que necesita barrer cada 20
+        # min dentro de la ventana 08-18 L-V — barrer con el cron de
+        # secuencias multiplicaría su ritmo sobre el mismo canal Baileys.
+        # `barrer()` sale en la primera línea de cada Agente IA con
+        # `followup_activo` en 0 (nace apagado en los 5 existentes,
+        # 2026-09-24) — registrar el job NO enciende nada.
+        "*/20 8-18 * * 1-5": [
+            "frappe_chatwoot.utils.autofollowup.barrer",
+        ],
     },
 }
 
