@@ -31,6 +31,7 @@ NOTA sobre `send_test_email` del core
 """
 
 import frappe
+from frappe_chatwoot.utils import plan
 from frappe import _
 
 _ROLES_EDICION = ("System Manager", "Sales Manager")
@@ -69,6 +70,7 @@ def _estado(c):
 
 @frappe.whitelist()
 def listar():
+    plan.exigir_no_lite()
     """Campañas con sus métricas, más recientes primero.
 
     `aperturas` = `total_views` (lo incrementa `newsletter_email_read`, el tracker
@@ -114,6 +116,7 @@ def listar():
 
 @frappe.whitelist()
 def serie_detalle(serie):
+    plan.exigir_no_lite()
     """Los pasos de una serie, ordenados, para pintar la línea de tiempo.
 
     Solo lectura de lo ya declarado al crear cada paso (ver `crear`) — no
@@ -149,6 +152,7 @@ def serie_detalle(serie):
 
 @frappe.whitelist()
 def grupos():
+    plan.exigir_no_lite()
     """Listas de correo disponibles (doctype `Email Group`)."""
     return frappe.get_all(
         "Email Group",
@@ -161,6 +165,7 @@ def grupos():
 
 @frappe.whitelist()
 def detalle(name):
+    plan.exigir_no_lite()
     frappe.flags.ignore_permissions = True  # ver nota en _exigir_edicion
     doc = frappe.get_doc("Newsletter", name)
     d = doc.as_dict()
@@ -195,6 +200,7 @@ def crear(
     serie pertenece, qué paso es y cada cuántos días va respecto al anterior.
     Nada se infiere ni se dispara solo.
     """
+    plan.exigir_no_lite()
     _exigir_edicion()
 
     subject = (subject or "").strip()
@@ -239,6 +245,7 @@ def crear(
 
 @frappe.whitelist()
 def probar(name, email):
+    plan.exigir_no_lite()
     """Manda una copia de prueba a un correo, sin marcar la campaña como enviada."""
     _exigir_edicion()
 
@@ -256,6 +263,7 @@ def probar(name, email):
 
 @frappe.whitelist()
 def enviar(name):
+    plan.exigir_no_lite()
     """Encola la campaña a toda la lista. No se puede deshacer."""
     _exigir_edicion()
 
@@ -281,6 +289,7 @@ def enviar(name):
 
 @frappe.whitelist()
 def crear_grupo(titulo):
+    plan.exigir_no_lite()
     """Da de alta una lista (`Email Group`) nueva, vacía."""
     _exigir_edicion()
 
@@ -299,6 +308,7 @@ def crear_grupo(titulo):
 
 @frappe.whitelist()
 def eliminar_grupo(email_group):
+    plan.exigir_no_lite()
     """Borra la lista y a todos sus suscriptores.
 
     No basta `ignore_permissions=True` en el borrado del grupo: su propio
@@ -324,6 +334,7 @@ def eliminar_grupo(email_group):
 
 @frappe.whitelist()
 def listar_suscriptores(email_group):
+    plan.exigir_no_lite()
     """Suscriptores de una lista, con su estado de baja."""
     _exigir_edicion()
 
@@ -360,6 +371,7 @@ def _agregar_uno(email_group, correo):
 
 @frappe.whitelist()
 def agregar_suscriptores(email_group, correos):
+    plan.exigir_no_lite()
     """Agrega correos sueltos a una lista (pegados a mano o desde un archivo
     en el cliente — el parseo de CSV/texto ya lo hizo el navegador)."""
     _exigir_edicion()
@@ -386,6 +398,7 @@ def agregar_suscriptores(email_group, correos):
 
 @frappe.whitelist()
 def agregar_contactos(email_group, contactos):
+    plan.exigir_no_lite()
     """Agrega a la lista el correo primario de cada `Contact` (selección
     humana explícita desde la pantalla de Contactos — nunca automática). Quien
     no tenga correo se reporta aparte, no se descarta en silencio."""
@@ -414,6 +427,7 @@ def agregar_contactos(email_group, contactos):
 
 @frappe.whitelist()
 def quitar_suscriptor(email_group, email):
+    plan.exigir_no_lite()
     """Quita a alguien de la lista (borrado real, no marca de baja — para eso
     ya existe el link de unsubscribe del propio correo)."""
     _exigir_edicion()

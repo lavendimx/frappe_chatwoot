@@ -211,6 +211,48 @@ doc_events = {
 }
 
 # ---------------------------------------------------------------------------
+# permission_query_conditions / has_permission — gate de plan (Lite/Pro/Enterprise)
+# ---------------------------------------------------------------------------
+# Complementa el gate ya puesto en los endpoints RPC (`plan.exigir_no_lite()` en
+# utils/secuencias.py, api/campanas.py, api/campana_email.py) para el acceso
+# genérico vía /api/resource/<doctype> que el SPA también usa para listar y leer.
+# Sin esto, un Sales User de un sitio Lite podía entrar a Secuencias, Campañas
+# de email, Llamadas y a la config del Agente IA con la URL directa — verificado
+# en vivo el 2026-09-25 en Six Gardens. Ver utils/plan.py: el nivel del sitio
+# vive en site_config.json (`sofia_plan`), default "enterprise" si no está
+# definida — un sitio sin esa llave no queda afectado.
+#
+# "CRM Call Log" es el doctype nativo de Frappe CRM para el módulo "Llamadas"
+# (app `crm`, no nuestro) — Enterprise-only en la tabla de planes nueva, por
+# eso usa el par `_enterprise` en vez de `_no_lite`.
+#
+# Sales Invoice / Payment Entry (Cobranza y facturación, ERPNext) se incluyen
+# a modo defensivo: hoy Six Gardens (único sitio Lite) no tiene ERPNext
+# instalado, así que estos hooks son inertes ahí — pero si algún día se
+# instala por error, el gate ya está puesto.
+permission_query_conditions = {
+    "Secuencia": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Secuencia Inscripcion": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Campana Email": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Campana Email Paso": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Agente IA": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Sales Invoice": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Payment Entry": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "CRM Call Log": "frappe_chatwoot.utils.plan.condicion_lista_enterprise",
+}
+
+has_permission = {
+    "Secuencia": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Secuencia Inscripcion": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Campana Email": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Campana Email Paso": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Agente IA": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Sales Invoice": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Payment Entry": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "CRM Call Log": "frappe_chatwoot.utils.plan.permiso_doc_enterprise",
+}
+
+# ---------------------------------------------------------------------------
 # override_doctype_class
 # ---------------------------------------------------------------------------
 # Newsletter personalizado POR DESTINATARIO. El core renderiza el HTML una sola

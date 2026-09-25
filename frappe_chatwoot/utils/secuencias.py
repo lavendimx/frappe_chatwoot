@@ -133,6 +133,7 @@ import random
 import time
 
 import frappe
+from frappe_chatwoot.utils import plan
 
 from . import autoria
 from . import chatwoot_client as cw
@@ -418,6 +419,7 @@ def _set_ins(ins_name: str, campos: dict, **kw) -> None:
 
 @frappe.whitelist()
 def reflejar_todas() -> dict:
+    plan.exigir_no_lite()
     """Backfill: recalcula los 3 campos en todos los deals con inscripción.
 
     Se corre una vez tras crear los campos (los inscritos actuales quedarían
@@ -435,6 +437,7 @@ def reflejar_todas() -> dict:
 
 @frappe.whitelist()
 def inscribir(secuencia: str, apply: int = 0, limite: int = 0) -> dict:
+    plan.exigir_no_lite()
     """Mete en la secuencia las oportunidades abiertas de su producto.
 
     Dry-run por defecto **a propósito**: inscribir es lo que decide a quién le va
@@ -1253,6 +1256,7 @@ def avanzar():
 
 @frappe.whitelist()
 def estado() -> dict:
+    plan.exigir_no_lite()
     """Resumen para saber qué está corriendo sin abrir la lista."""
     filas = frappe.db.sql(
         """SELECT i.secuencia, s.titulo, s.activa, i.estado, COUNT(*) n
@@ -1266,6 +1270,7 @@ def estado() -> dict:
 
 @frappe.whitelist()
 def listar_inscripciones(secuencia: str | None = None, estado: str | None = None) -> dict:
+    plan.exigir_no_lite()
     """Inscripciones para la pantalla "Secuencias": quién está enrolado en qué
     secuencia y en qué paso va. Solo lectura — no pausa ni saca a nadie."""
     filtros = {}
@@ -1371,6 +1376,7 @@ def _exigir_edicion():
 
 @frappe.whitelist()
 def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) -> list:
+    plan.exigir_no_lite()
     """Busca oportunidades para inscribir a mano.
 
     Se busca por nombre de contacto (el caso normal: el humano piensa en la
@@ -1438,6 +1444,7 @@ def buscar_deals(q: str = "", secuencia: str | None = None, limite: int = 20) ->
 
 @frappe.whitelist()
 def inscribir_deal(secuencia: str, deal: str) -> dict:
+    plan.exigir_no_lite()
     """Inscribe UNA oportunidad a mano, sin el filtro por producto de `inscribir()`.
 
     `inscribir()` es la carga masiva por rama (todos los deals abiertos de un
@@ -1523,6 +1530,7 @@ def inscribir_deal(secuencia: str, deal: str) -> dict:
 
 @frappe.whitelist()
 def inscribir_desde_lista(email_group: str, secuencia: str) -> dict:
+    plan.exigir_no_lite()
     """Puente Campaña → Secuencia (plan campanas-newsletter-secuencias.md,
     Fase C, paso 13): inscribe a quien ya tenga una oportunidad (`CRM Deal`),
     reporta al resto y **nunca crea `CRM Lead` para completar el hueco** — un
@@ -1579,6 +1587,7 @@ def inscribir_desde_lista(email_group: str, secuencia: str) -> dict:
 
 @frappe.whitelist()
 def sacar_inscripcion(inscripcion: str, motivo: str | None = None) -> dict:
+    plan.exigir_no_lite()
     """Saca a un contacto de la secuencia, a mano.
 
     Deja el estado en "Salió a mano" en vez de borrar la fila: la inscripción es
@@ -1603,6 +1612,7 @@ def sacar_inscripcion(inscripcion: str, motivo: str | None = None) -> dict:
 
 @frappe.whitelist()
 def forzar_paso(inscripcion: str) -> dict:
+    plan.exigir_no_lite()
     """Ejecuta YA el siguiente paso de una inscripción, saltándose la espera.
 
     "Forzar" es saltarse la ventana horaria y el `proximo_en`, **no** las

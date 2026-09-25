@@ -34,6 +34,7 @@ FECHA ESTIMADA
 """
 
 import frappe
+from frappe_chatwoot.utils import plan
 from frappe import _
 
 from .campanas import _exigir_edicion, _puede_editar, _remitente_default, _estado as _estado_newsletter
@@ -95,6 +96,7 @@ def _enriquecer_pasos(doc):
 
 @frappe.whitelist()
 def listar_campanas():
+    plan.exigir_no_lite()
     """Campañas con el resumen que hoy falta en pantalla: cuántos pasos,
     cuántos redactados/enviados, y el próximo pendiente."""
     campanas = frappe.get_all(
@@ -120,6 +122,7 @@ def listar_campanas():
 
 @frappe.whitelist()
 def detalle_campana(name):
+    plan.exigir_no_lite()
     """La campaña completa con su línea de tiempo — lo que pediste ver:
     entrar a la campaña y ver los N correos y la cadencia entre cada uno."""
     doc = frappe.get_doc("Campana Email", name)
@@ -132,6 +135,7 @@ def detalle_campana(name):
 
 @frappe.whitelist()
 def crear_campana(titulo, email_group, remitente_email=None, remitente_nombre=None, pasos=None):
+    plan.exigir_no_lite()
     """Crea la campaña con todos sus pasos declarados de una vez (título +
     cadencia). Los pasos nacen sin `newsletter` — se redactan después."""
     _exigir_edicion()
@@ -169,6 +173,7 @@ def crear_campana(titulo, email_group, remitente_email=None, remitente_nombre=No
 
 @frappe.whitelist()
 def agregar_paso(campana, titulo_paso, espera_dias=0, programado_para=None):
+    plan.exigir_no_lite()
     _exigir_edicion()
     doc = frappe.get_doc("Campana Email", campana)
     titulo_paso = (titulo_paso or "").strip()
@@ -186,6 +191,7 @@ def agregar_paso(campana, titulo_paso, espera_dias=0, programado_para=None):
 
 @frappe.whitelist()
 def editar_paso(campana, nombre_paso, titulo_paso=None, espera_dias=None, programado_para=None):
+    plan.exigir_no_lite()
     _exigir_edicion()
     doc = frappe.get_doc("Campana Email", campana)
     fila = next((p for p in doc.pasos if p.name == nombre_paso), None)
@@ -206,6 +212,7 @@ def editar_paso(campana, nombre_paso, titulo_paso=None, espera_dias=None, progra
 
 @frappe.whitelist()
 def eliminar_paso(campana, nombre_paso):
+    plan.exigir_no_lite()
     _exigir_edicion()
     doc = frappe.get_doc("Campana Email", campana)
     fila = next((p for p in doc.pasos if p.name == nombre_paso), None)
@@ -221,6 +228,7 @@ def eliminar_paso(campana, nombre_paso):
 
 @frappe.whitelist()
 def reordenar_pasos(campana, orden):
+    plan.exigir_no_lite()
     """`orden` = lista de `name` de filas de `pasos` en el orden deseado."""
     _exigir_edicion()
     if isinstance(orden, str):
@@ -240,6 +248,7 @@ def reordenar_pasos(campana, orden):
 
 @frappe.whitelist()
 def redactar_paso(campana, nombre_paso, subject, contenido, content_type="HTML"):
+    plan.exigir_no_lite()
     """Crea el `Newsletter` del paso y lo liga — la vía normal para pasar un
     paso de 'Sin redactar' a 'Programado'. Reusa la misma validación y
     remitente de `api/campanas.crear`, apuntado a la lista de la campaña."""
@@ -283,6 +292,7 @@ def redactar_paso(campana, nombre_paso, subject, contenido, content_type="HTML")
 
 @frappe.whitelist()
 def ligar_newsletter(campana, nombre_paso, newsletter):
+    plan.exigir_no_lite()
     """Liga un `Newsletter` YA EXISTENTE a un paso — la vía de migración
     (ej. el email 1 de COPARMEX, ya redactado y validado antes de que
     existiera este contenedor)."""
@@ -301,6 +311,7 @@ def ligar_newsletter(campana, nombre_paso, newsletter):
 
 @frappe.whitelist()
 def activar_campana(campana, activa):
+    plan.exigir_no_lite()
     _exigir_edicion()
     frappe.db.set_value("Campana Email", campana, "activa", frappe.utils.cint(activa))
     frappe.db.commit()
@@ -309,6 +320,7 @@ def activar_campana(campana, activa):
 
 @frappe.whitelist()
 def enviar_paso_ahora(campana, nombre_paso):
+    plan.exigir_no_lite()
     """Disparo manual — el mismo botón que existe hoy para un Newsletter
     suelto, pero validado contra el paso de la campaña."""
     _exigir_edicion()
