@@ -76,6 +76,15 @@ SALUDO = (
 # Propiedad ≠ asignación: quién trabaja cada caso sigue siendo el `_assign`.
 LEAD_OWNER_DEFAULT = "alejandro.moreno@lavendi.mx"
 
+
+def _lead_owner_default():
+    # `alejandro.moreno@lavendi.mx` no existe en todos los sitios de cliente
+    # (ej. sixgardens/estrublock) — usarlo ahí revienta el Link con 417. Cada
+    # sitio puede declarar su propio dueño en site_config.json
+    # (`"lead_owner_default": "usuario@dominio"`); sin esa clave el
+    # comportamiento es idéntico al de siempre (byte a byte).
+    return frappe.conf.get("lead_owner_default") or LEAD_OWNER_DEFAULT
+
 # Ventana en la que GHL dejaba salir el saludo: L-V 08:00-18:00. Un lead que
 # llega un sábado a las 23:00 recibe su WhatsApp el lunes a las 08:00, no de
 # madrugada.
@@ -250,7 +259,7 @@ def _crear_ficha(contacto, *, nombre="", email="", telefono="", source="Formular
             "contact": contacto,
             "contacts": [{"contact": contacto, "is_primary": 1}],
             "status": "Lead",
-            "deal_owner": LEAD_OWNER_DEFAULT,
+            "deal_owner": _lead_owner_default(),
             # El título de la oportunidad es la persona, no la empresa: sin este
             # `deal_name` explícito, `set_deal_name()` prefiere `organization_name`
             # y la lista mostraría el nombre de la empresa en vez del prospecto.
@@ -271,7 +280,7 @@ def _crear_ficha(contacto, *, nombre="", email="", telefono="", source="Formular
         "doctype": "CRM Lead",
         "contact": None,
         "status": "New",
-        "lead_owner": LEAD_OWNER_DEFAULT,
+        "lead_owner": _lead_owner_default(),
     })
     if organization_name:
         campos["organization"] = organization_name
@@ -357,7 +366,7 @@ def _registrar_resolicitud(doc, doctype, name):
     }).insert(ignore_permissions=True)
 
     campo_dueno = "deal_owner" if doctype == "CRM Deal" else "lead_owner"
-    dueno = frappe.db.get_value(doctype, name, campo_dueno) or LEAD_OWNER_DEFAULT
+    dueno = frappe.db.get_value(doctype, name, campo_dueno) or _lead_owner_default()
     tarea = frappe.get_doc({
         "doctype": "CRM Task",
         "title": f"Volvió a llenar el formulario: {doc.nombre or 'sin nombre'}",
