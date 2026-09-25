@@ -75,8 +75,8 @@
   "docstatus": 0,
   "doctype": "CRM Fields Layout",
   "dt": "CRM Lead",
-  "layout": "[{\"name\": \"lost_reason_section\", \"label\": \"Lost Reason\", \"opened\": true, \"columns\": [{\"name\": \"lost_reason_column\", \"fields\": [\"lost_reason\", \"lost_notes\"]}]}, {\"columns\": [{\"fields\": [\"organization\", \"source\", \"lead_owner\"], \"name\": \"column_kl92\"}], \"label\": \"Details\", \"name\": \"details_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"first_name\", \"last_name\", \"email\", \"mobile_no\"], \"name\": \"column_XmW2\"}], \"label\": \"Person\", \"name\": \"person_section\", \"opened\": true}]",
-  "modified": "2026-09-21 16:41:59.572987",
+  "layout": "[{\"columns\": [{\"fields\": [\"organization\", \"source\", \"lead_owner\"], \"name\": \"column_kl92\"}], \"label\": \"Details\", \"name\": \"details_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"first_name\", \"last_name\", \"email\", \"mobile_no\"], \"name\": \"column_XmW2\"}], \"label\": \"Person\", \"name\": \"person_section\", \"opened\": true}]",
+  "modified": "2026-09-25 07:00:53.680231",
   "name": "CRM Lead-Side Panel",
   "type": "Side Panel"
  },
@@ -84,8 +84,8 @@
   "docstatus": 0,
   "doctype": "CRM Fields Layout",
   "dt": "CRM Deal",
-  "layout": "[{\"contacts\": [], \"editable\": false, \"label\": \"Contacts\", \"name\": \"contacts_section\", \"opened\": true}, {\"name\": \"lost_reason_section\", \"label\": \"Lost Reason\", \"opened\": true, \"columns\": [{\"name\": \"lost_reason_column\", \"fields\": [\"lost_reason\", \"lost_notes\"]}]}, {\"columns\": [{\"fields\": [\"organization\", \"closed_date\", \"probability\", \"deal_owner\", \"deal_value\", \"deal_name\"], \"name\": \"column_na2Q\"}], \"label\": \"Organization Details\", \"name\": \"organization_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"producto_contratado\"], \"name\": \"column_producto\"}], \"label\": \"Producto contratado\", \"name\": \"producto_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"secuencia_actual\", \"secuencia_paso\", \"secuencia_estado\"], \"name\": \"column_secuencia\"}], \"label\": \"Secuencia de seguimiento\", \"name\": \"secuencia_section\", \"opened\": true}]",
-  "modified": "2026-09-21 16:41:59.443065",
+  "layout": "[{\"contacts\": [], \"editable\": false, \"label\": \"Contacts\", \"name\": \"contacts_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"organization\", \"closed_date\", \"probability\", \"deal_owner\", \"deal_value\", \"deal_name\"], \"name\": \"column_na2Q\"}], \"label\": \"Organization Details\", \"name\": \"organization_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"producto_contratado\"], \"name\": \"column_producto\"}], \"label\": \"Producto contratado\", \"name\": \"producto_section\", \"opened\": true}, {\"columns\": [{\"fields\": [\"secuencia_actual\", \"secuencia_paso\", \"secuencia_estado\"], \"name\": \"column_secuencia\"}], \"label\": \"Secuencia de seguimiento\", \"name\": \"secuencia_section\", \"opened\": true}]",
+  "modified": "2026-09-24 17:38:01.687736",
   "name": "CRM Deal-Side Panel",
   "type": "Side Panel"
  },
