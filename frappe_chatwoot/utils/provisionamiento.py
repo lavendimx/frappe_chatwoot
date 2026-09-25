@@ -318,6 +318,20 @@ def _branding_plataforma():
             ws.set(campo, valor)
         ws.save(ignore_permissions=True)
 
+    # El SPA del CRM (BrandLogo.vue / stores/settings.js) NO lee Website
+    # Settings -- lee FCRM Settings.{brand_name,brand_logo,favicon}, sembrado
+    # ademas en el boot por `crm/www/crm.py:get_brand()`. Website Settings de
+    # arriba es el que ve el login/Desk de Frappe; sin este bloque un sitio
+    # nuevo nace con el isotipo de Frappe CRM en el SPA aunque Website Settings
+    # ya diga "Sofía GPT" -- hallazgo real: crm.lavendi.mx lo tenia seteado a
+    # mano desde el 18-sep, sixgardens (17-sep) nunca lo tuvo.
+    fs = frappe.get_single("FCRM Settings")
+    if not (fs.brand_name or "").strip():
+        fs.brand_name = BRANDING["app_name"]
+        fs.brand_logo = BRANDING["app_logo"]
+        fs.favicon = BRANDING["favicon"]
+        fs.save(ignore_permissions=True)
+
 
 def _idioma_plataforma():
     """Idioma por defecto del sitio: espanol.

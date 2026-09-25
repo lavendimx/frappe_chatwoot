@@ -46,6 +46,9 @@ CAMPOS_PERMITIDOS = {
     "mobile_no", "deal_owner", "lost_reason", "source", "creation", "modified",
     "closed_date", "gclid_ads", "gbraid", "wbraid", "utm_source", "utm_campaign",
     "utm_term", "ghl_session_source", "ghl_medium",
+    # F4.2 (2026-09-24): columnas eb_* del dashboard de Estrublock (sofia_client.py:_EB_DEAL_FIELDS)
+    "familia_de_productos", "medio_de_contacto", "meta_campana",
+    "ad_title", "fuente_campana", "canal_detalle",
 }
 
 CAMPOS_DEFAULT = ["name", "ghl_opportunity_id", "ghl_status", "ghl_stage",

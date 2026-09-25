@@ -40,13 +40,6 @@ scheduler_events = {
         "*/15 * * * *": [
             "frappe_chatwoot.utils.recordatorios.enviar_recordatorios",
         ],
-        # Bienvenida a los leads del formulario del sitio — reemplaza la espera
-        # de 5 min que los workflows 1.2/1.3 de GHL tenían dentro del árbol.
-        # Barrido sin estado por la misma razón que el recordatorio: una espera
-        # viva dentro de un proceso no sobrevive a un reinicio.
-        "*/5 * * * *": [
-            "frappe_chatwoot.utils.captacion.enviar_bienvenidas",
-        ],
         # Motor de secuencias PVP — réplica de «4. Seguimientos» de GHL.
         # `avanzar()` sale en la primera línea si
         # `Chatwoot Settings.secuencias_activas` está en 0, así que registrar el
@@ -114,8 +107,21 @@ scheduler_events = {
         # reales acumuladas que no deben resucitar de golpe). Cada 5 min, no
         # menos: los minutos configurables (`Agente IA.minutos_pausa_humana`)
         # son enteros, un barrido más fino no aporta precisión real.
+        #
+        # Comparte la clave "*/5 * * * *" con la bienvenida del formulario de
+        # abajo (`captacion.enviar_bienvenidas`) — 2026-09-25: se fusionaron
+        # en una sola lista porque un dict literal de Python con la misma
+        # clave repetida se sobrescribe en tiempo de parseo (gana la última),
+        # lo que dejó sin registrar el job de bienvenida entre el 18-sep y el
+        # 25-sep sin ningún error visible. NO volver a separar esta clave.
         "*/5 * * * *": [
             "frappe_chatwoot.utils.pausas.expirar_pausas",
+            # Bienvenida a los leads del formulario del sitio — reemplaza la
+            # espera de 5 min que los workflows 1.2/1.3 de GHL tenían dentro
+            # del árbol. Barrido sin estado por la misma razón que el
+            # recordatorio: una espera viva dentro de un proceso no sobrevive
+            # a un reinicio.
+            "frappe_chatwoot.utils.captacion.enviar_bienvenidas",
         ],
     },
 }
@@ -137,6 +143,11 @@ scheduler_events = {
 doc_events = {
     "KB Source": {
         "before_insert": "frappe_chatwoot.utils.kb_isolation.set_inbox_from_user_permission",
+    },
+    # Tope de usuarios de Sofía Lite (site_config `sofia_lite_max_usuarios`, ver
+    # utils/seat_cap.py) — inerte si el sitio no define esa llave.
+    "User": {
+        "before_insert": "frappe_chatwoot.utils.seat_cap.validar_tope_usuarios",
     },
     "CRM Deal": {
         # `ghl_status` es una proyección de `status`, no un campo que se mantenga

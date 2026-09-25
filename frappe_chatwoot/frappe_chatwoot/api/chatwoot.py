@@ -658,11 +658,20 @@ def _webhook_authentic(settings) -> bool:
 
 @frappe.whitelist()
 def list_inboxes() -> list[dict]:
-    """Inboxes de la cuenta (uno por cliente/canal). Sirve para el filtro de la
-    bandeja y para etiquetar cada conversación con su origen."""
+    """Inboxes DE ESTE SITIO. Sirve para el filtro de la bandeja y para
+    etiquetar cada conversación con su origen.
+
+    Antes devolvía `cw.list_inboxes()` sin filtrar — TODA la cuenta de
+    Chatwoot, compartida entre clientes (lavendi.mx, Six Gardens, Estrublock).
+    El selector de canal de un sitio mostraba literalmente los inboxes de los
+    otros clientes, y elegirlos a mano funcionaba (ver `get_conversations`,
+    que hasta este mismo fix tampoco lo impedía) — hallazgo real de Alejandro
+    2026-09-25, no cosmético. Se filtra a `_inboxes_del_sitio()`.
+    """
     validate_role()
     if not is_chatwoot_enabled():
         return []
+    propios = set(_inboxes_del_sitio())
     return [
         {
             "id": inbox.get("id"),
@@ -670,6 +679,7 @@ def list_inboxes() -> list[dict]:
             "channel_type": inbox.get("channel_type"),
         }
         for inbox in cw.list_inboxes()
+        if inbox.get("id") in propios
     ]
 
 
@@ -844,15 +854,25 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
         return []
     if status not in ("open", "resolved", "pending", "snoozed", "all"):
         frappe.throw("status inválido")
-    # Aislamiento entre clientes: un canal explícito se respeta tal cual (se
-    # asume del propio selector, que solo ofrece inboxes de esta cuenta). Sin
-    # canal explícito ("Todos los canales") se fusionan los inboxes DE ESTE
-    # SITIO (_inboxes_del_sitio) — nunca la cuenta de Chatwoot completa. Antes
-    # de esto, sin canal devolvía None y Chatwoot entregaba TODOS los inboxes
-    # de la cuenta compartida (Six Gardens aparecía en la bandeja de
-    # lavendi.mx, cerrado 2026-09-16). Ver docs/project_agente_whatsapp.md.
+    # Aislamiento entre clientes. Sin canal explícito ("Todos los canales") se
+    # fusionan los inboxes DE ESTE SITIO (_inboxes_del_sitio) — nunca la cuenta
+    # de Chatwoot completa (cerrado 2026-09-16, Six Gardens en la bandeja de
+    # lavendi.mx). Con canal explícito se exige que sea uno de los propios: un
+    # canal ajeno (ej. Estrublock desde lavendi.mx) YA NO se atiende — hasta
+    # este fix el chequeo solo cubría "sin canal" y pedir uno ajeno a mano (o
+    # por API) devolvía sus conversaciones reales sin aviso (hallazgo de
+    # Alejandro, 2026-09-25). Ver docs/project_agente_whatsapp.md.
+    propios = _inboxes_del_sitio()
     canal_explicito = frappe.utils.cint(inbox_id)
-    canales = [canal_explicito] if canal_explicito else _inboxes_del_sitio()
+    if canal_explicito:
+        if canal_explicito not in propios:
+            frappe.throw(
+                f"El inbox {canal_explicito} no pertenece a este sitio.",
+                frappe.PermissionError,
+            )
+        canales = [canal_explicito]
+    else:
+        canales = propios
 
     conversations = []
     for canal in canales:
@@ -1010,10 +1030,12 @@ def search_conversations(q: str = "", limit=40) -> list[dict]:
             filas.append(_shape_conversation(conv, pausadas, archivadas))
 
     # El buscador ignora a proposito el filtro de estado/canal de la vista, pero NO
-    # debe cruzar de cliente: se limita al inbox de este sitio (mismo criterio que
-    # get_conversations). Ver docs/project_agente_whatsapp.md.
-    scoped_inbox = _default_inbox_id()
-    filas = [f for f in filas if f.get("inbox_id") == scoped_inbox]
+    # debe cruzar de cliente: se limita a los inboxes de ESTE sitio (mismo
+    # criterio y misma fuente que get_conversations/list_inboxes). Antes solo
+    # miraba el inbox por defecto, así que en lavendi.mx un contacto que solo
+    # escribió por Messenger no aparecía nunca en el buscador.
+    propios = set(_inboxes_del_sitio())
+    filas = [f for f in filas if f.get("inbox_id") in propios]
     filas.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
     return filas[: frappe.utils.cint(limit) or 40]
 
