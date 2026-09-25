@@ -183,8 +183,17 @@ doc_events = {
     # de Frappe, así que editar el nombre en el CRM no se veía en Conversaciones
     # (reportado por Alejandro el 2026-09-15). Frappe es la fuente de verdad.
     "Contact": {
-        "on_update": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
-        "after_insert": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
+        "on_update": [
+            "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
+            # Todo alta/edición de Contact debe tener su Customer de ERPNext —
+            # sin esto el contacto queda invisible en Cobranza (2026-09-25,
+            # caso Alma Cabello). Ver utils/cliente_erp.py.
+            "frappe_chatwoot.utils.cliente_erp.crear_customer_si_falta",
+        ],
+        "after_insert": [
+            "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
+            "frappe_chatwoot.utils.cliente_erp.crear_customer_si_falta",
+        ],
         # crm_organization (Link al catalogo, 2026-09-17) -> company_name.
         "validate": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_organizacion",
     },
