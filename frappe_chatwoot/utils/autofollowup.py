@@ -426,3 +426,57 @@ def guardar_config(inbox_id, activo, ventana_inicio, ventana_fin, max_por_corrid
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     return {"ok": True}
+
+
+@frappe.whitelist()
+def listar_activos(inbox_id) -> list:
+    """Filas de `Chatwoot Followup` de un inbox, para la pantalla de Agente IA:
+    quién está en re-enganche y en qué paso, para poder excluir a mano."""
+    _exigir_edicion()
+    return frappe.get_all(
+        "Chatwoot Followup",
+        filters={"inbox_id": str(inbox_id)},
+        fields=["name", "conversation_id", "contacto_nombre", "deal", "estado",
+                "paso_actual", "proximo_en", "ultimo_out_at", "motivo", "creation"],
+        order_by="creation desc",
+        limit_page_length=200,
+    )
+
+
+@frappe.whitelist()
+def excluir_a_mano(conversation_id, motivo=None) -> dict:
+    """Saca una conversación del autofollow a mano (botón del panel).
+
+    Si no tiene fila todavía, la crea ya cerrada — `_crear_followups_nuevos`
+    nunca la vuelve a meter (comprueba `frappe.db.exists` por
+    `conversation_id`, sin importar el estado). Igual que
+    `secuencias.sacar_inscripcion`: no se borra, se marca — el rastro de que
+    alguien lo excluyó a propósito importa más que el espacio que ocupa."""
+    _exigir_edicion()
+    conversation_id = frappe.utils.cint(conversation_id)
+    motivo = (motivo or "Excluido a mano desde el panel")[:139]
+    existente = frappe.db.get_value("Chatwoot Followup", {"conversation_id": conversation_id}, "name")
+    if existente:
+        doc = frappe.get_doc("Chatwoot Followup", existente)
+        doc.estado = "Salió a mano"
+        doc.motivo = motivo
+        doc.save(ignore_permissions=True)
+    else:
+        deal = _deal_de(conversation_id) or {}
+        doc = frappe.get_doc({
+            "doctype": "Chatwoot Followup",
+            "conversation_id": conversation_id,
+            "inbox_id": str(_inbox_de(conversation_id) or ""),
+            "deal": deal.get("name"),
+            "estado": "Salió a mano",
+            "paso_actual": 0,
+            "motivo": motivo,
+        })
+        doc.insert(ignore_permissions=True)
+    frappe.db.commit()
+    return {"ok": True, "name": doc.name}
+
+
+def _inbox_de(conversation_id) -> int | None:
+    conv = chatwoot_client.get_conversation(conversation_id)
+    return (conv.get("inbox_id"))
