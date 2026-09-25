@@ -34,6 +34,8 @@ DOCTYPES = [
     "Sofia Push Subscription",
     "Solicitud Web",
     "Stripe Settings",
+    "Chatwoot Followup",
+    "Agente IA Followup Paso",
 ]
 
 MODULE = "Frappe Chatwoot"
