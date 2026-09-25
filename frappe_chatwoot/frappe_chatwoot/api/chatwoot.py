@@ -466,6 +466,32 @@ def _default_inbox_id() -> int:
     return frappe.utils.cint(inbox_id)
 
 
+def _inboxes_del_sitio() -> list[int]:
+    """Inboxes de Chatwoot que pertenecen a ESTE sitio/cliente.
+
+    Lee `Chatwoot Settings.canales_bandeja` (lista separada por coma). Vacío =
+    solo el inbox por defecto — comportamiento idéntico al de antes de este
+    campo, así que un sitio que nunca lo configure (Six Gardens, Estrublock)
+    no cambia de comportamiento.
+
+    Es la fuente de verdad de "todos los canales" en `get_conversations`: fusiona
+    SOLO esta lista, nunca la cuenta de Chatwoot completa — eso fue justo el bug
+    de aislamiento cerrado el 2026-09-16 (Six Gardens apareciendo en la bandeja
+    de lavendi.mx). Un canal nuevo (ej. Instagram) se suma agregando su id aquí,
+    sin tocar código.
+    """
+    settings = frappe.get_single("Chatwoot Settings")
+    raw = (settings.canales_bandeja or "").strip()
+    if not raw:
+        return [_default_inbox_id()]
+    ids = []
+    for parte in raw.split(","):
+        parte = parte.strip()
+        if parte.isdigit():
+            ids.append(int(parte))
+    return ids or [_default_inbox_id()]
+
+
 @frappe.whitelist()
 def get_templates(inbox_id: int = None) -> list[dict]:
     """Chatwoot-native WhatsApp template list, sourced straight from the
@@ -818,13 +844,25 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
         return []
     if status not in ("open", "resolved", "pending", "snoozed", "all"):
         frappe.throw("status inválido")
-    # Aislamiento entre clientes: sin canal explicito se usa el canal de ESTE
-    # sitio, nunca 'todos'. Antes devolvia None y Chatwoot entregaba las
-    # conversaciones de todos los inboxes de la cuenta compartida (Six Gardens
-    # aparecia en la bandeja de lavendi.mx). Ver docs/project_agente_whatsapp.md.
-    canal = frappe.utils.cint(inbox_id) or _default_inbox_id()
+    # Aislamiento entre clientes: un canal explícito se respeta tal cual (se
+    # asume del propio selector, que solo ofrece inboxes de esta cuenta). Sin
+    # canal explícito ("Todos los canales") se fusionan los inboxes DE ESTE
+    # SITIO (_inboxes_del_sitio) — nunca la cuenta de Chatwoot completa. Antes
+    # de esto, sin canal devolvía None y Chatwoot entregaba TODOS los inboxes
+    # de la cuenta compartida (Six Gardens aparecía en la bandeja de
+    # lavendi.mx, cerrado 2026-09-16). Ver docs/project_agente_whatsapp.md.
+    canal_explicito = frappe.utils.cint(inbox_id)
+    canales = [canal_explicito] if canal_explicito else _inboxes_del_sitio()
 
-    conversations = _barrer_canal(canal, status)
+    conversations = []
+    for canal in canales:
+        conversations.extend(_barrer_canal(canal, status))
+    if len(canales) > 1:
+        # Un mismo id de conversación no puede repetirse entre inboxes
+        # distintos (son globales en Chatwoot), pero se deduplica por id de
+        # todas formas — barato y a prueba de que algún día dos llamadas se
+        # traslapen.
+        conversations = list({c.get("id"): c for c in conversations}.values())
 
     pausadas = _ids_marcados("Chatwoot Pausa")
     archivadas_ids = _ids_marcados("Chatwoot Archivo")

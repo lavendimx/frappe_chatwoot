@@ -12,6 +12,7 @@
   "account_id",
   "column_break_main",
   "default_inbox_id",
+  "canales_bandeja",
   "cache_ttl_seconds",
   "section_break_meta",
   "fb_app_id",
@@ -35,7 +36,7 @@
    "mandatory_depends_on": "eval:doc.enabled"
   },
   {
-   "description": "User Access Token for a dedicated service agent (NOT the bot token or platform token — both are rejected by conversation read endpoints). Sent as the api_access_token header.",
+   "description": "User Access Token for a dedicated service agent (NOT the bot token or platform token \u2014 both are rejected by conversation read endpoints). Sent as the api_access_token header.",
    "fieldname": "api_token",
    "fieldtype": "Password",
    "label": "API Token",
@@ -60,8 +61,14 @@
    "label": "Default Inbox ID"
   },
   {
+   "fieldname": "canales_bandeja",
+   "fieldtype": "Data",
+   "label": "Canales de la bandeja unificada",
+   "description": "IDs de inbox de Chatwoot que pertenecen a ESTE sitio/cliente, separados por coma (ej. \"5,12\"). \"Todos los canales\" en Conversaciones fusiona SOLO estos inboxes, nunca los de otro cliente en la misma cuenta de Chatwoot. Vacio = se usa solo Default Inbox ID (comportamiento de antes)."
+  },
+  {
    "default": "20",
-   "description": "Self-imposed cache TTL for live Chatwoot reads (Chatwoot exposes no rate-limit headers — see README). Applies to conversation list/detail and message list reads.",
+   "description": "Self-imposed cache TTL for live Chatwoot reads (Chatwoot exposes no rate-limit headers \u2014 see README). Applies to conversation list/detail and message list reads.",
    "fieldname": "cache_ttl_seconds",
    "fieldtype": "Int",
    "label": "Cache TTL (seconds)"
@@ -91,7 +98,7 @@
    "label": "Messaging (Meta)"
   },
   {
-   "description": "Facebook App ID de la app de Meta de este CRM (Sofía CRM - lavendi.mx). Es PUBLICO: lo usa el JS SDK en el navegador para conectar paginas. La clave secreta NO vive aqui, vive en Chatwoot.",
+   "description": "Facebook App ID de la app de Meta de este CRM (Sof\u00eda CRM - lavendi.mx). Es PUBLICO: lo usa el JS SDK en el navegador para conectar paginas. La clave secreta NO vive aqui, vive en Chatwoot.",
    "fieldname": "fb_app_id",
    "fieldtype": "Data",
    "label": "Facebook App ID"
