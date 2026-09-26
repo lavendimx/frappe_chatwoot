@@ -1088,13 +1088,34 @@ def _emitir_factura(customer: str, concepto: str, monto: float, emision, dias_cr
     return inv
 
 
-def _validar_monto_y_cliente(customer: str, monto) -> float:
+def _resolver_customer(identificador: str) -> str:
+    """Acepta un `Customer` (uso normal) o un `Contact` del CRM sin `Customer`
+    vinculado todavía — en ese caso lo crea al vuelo con la misma lógica del
+    alta manual (`cliente_erp._asegurar_customer`), para que Cobranza nunca
+    dependa de un paso previo en el Desk de ERPNext (2026-09-26: 4,192 de 4,291
+    contactos no tenían Customer y quedaban fuera de este módulo)."""
+    if frappe.db.exists("Customer", identificador):
+        return identificador
+
+    if frappe.db.exists("Contact", identificador):
+        from frappe_chatwoot.utils.cliente_erp import _asegurar_customer
+
+        customer = _asegurar_customer(frappe.get_doc("Contact", identificador))
+        if not customer:
+            frappe.throw(
+                "Este contacto no tiene nombre suficiente para crear un cliente de facturación."
+            )
+        return customer.name
+
+    frappe.throw("El cliente o contacto no existe")
+
+
+def _validar_monto_y_cliente(customer: str, monto) -> tuple[str, float]:
     monto = round(float(monto), 2)
     if monto <= 0:
         frappe.throw("El monto debe ser mayor a cero")
-    if not frappe.db.exists("Customer", customer):
-        frappe.throw("El cliente no existe")
-    return monto
+    customer = _resolver_customer(customer)
+    return customer, monto
 
 
 @frappe.whitelist()
@@ -1112,7 +1133,7 @@ def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Mon
     validate_role()
     if frecuencia not in FRECUENCIAS:
         frappe.throw("Frecuencia inválida")
-    monto = _validar_monto_y_cliente(customer, monto)
+    customer, monto = _validar_monto_y_cliente(customer, monto)
 
     hoy = frappe.utils.getdate(frappe.utils.today())
     emision = frappe.utils.getdate(emision) if emision else hoy
@@ -1150,7 +1171,7 @@ def crear_factura(customer: str, concepto: str, monto, emision: str = None,
     del archivo) — quien necesite eso sigue yendo al Desk.
     """
     validate_role()
-    monto = _validar_monto_y_cliente(customer, monto)
+    customer, monto = _validar_monto_y_cliente(customer, monto)
 
     hoy = frappe.utils.getdate(frappe.utils.today())
     emision = frappe.utils.getdate(emision) if emision else hoy
@@ -1217,15 +1238,54 @@ def eliminar_recurrente(name: str) -> dict:
 
 @frappe.whitelist()
 def buscar_clientes(q: str = "", limit: int = 20) -> list[dict]:
+    """Selector de 'Nuevo cargo'. Devuelve `Customer` (clientes ya de alta en
+    Cobranza) y, además, `Contact` del CRM que todavía no tienen uno —
+    marcados `tipo: "contact"` para que el frontend avise que se creará al
+    elegirlos (ver `_resolver_customer`). Solo 99 de 4,291 contactos tenían
+    `Customer` antes de esto (2026-09-26) — sin la rama de `Contact`, el
+    99.98% del CRM era invisible aquí y obligaba a pasar primero por el Desk
+    de ERPNext."""
     validate_role()
     q = (q or "").strip()
+    limit = frappe.utils.cint(limit) or 20
+
     filtros = {"disabled": 0}
     if len(q) >= 2:
         filtros["customer_name"] = ["like", f"%{q}%"]
-    return frappe.get_all(
+    clientes = frappe.get_all(
         "Customer", filters=filtros, fields=["name", "customer_name"],
-        order_by="customer_name asc", limit_page_length=frappe.utils.cint(limit) or 20,
+        order_by="customer_name asc", limit_page_length=limit,
     )
+    resultados = [{**c, "tipo": "customer"} for c in clientes]
+
+    if len(q) >= 2:
+        contactos = frappe.db.sql(
+            """
+            SELECT DISTINCT c.name, c.full_name
+            FROM `tabContact` c
+            LEFT JOIN `tabContact Phone` cp ON cp.parent = c.name
+            LEFT JOIN `tabContact Email` ce ON ce.parent = c.name
+            WHERE (c.full_name LIKE %(q)s OR cp.phone LIKE %(q)s OR ce.email_id LIKE %(q)s)
+              -- Ya tiene Customer vinculado por ghl_contact_id: ya salió en
+              -- `clientes` arriba (con su propio nombre) o saldrá al buscar
+              -- por ese nombre — no duplicar la entrada aquí.
+              AND NOT EXISTS (
+                  SELECT 1 FROM `tabCustomer` cu
+                  WHERE cu.ghl_contact_id = c.ghl_contact_id
+                    AND c.ghl_contact_id IS NOT NULL AND c.ghl_contact_id != ''
+              )
+            ORDER BY c.full_name ASC
+            LIMIT %(limit)s
+            """,
+            {"q": f"%{q}%", "limit": limit},
+            as_dict=True,
+        )
+        resultados += [
+            {"name": ct["name"], "customer_name": ct["full_name"] or ct["name"], "tipo": "contact"}
+            for ct in contactos
+        ]
+
+    return resultados[:limit]
 
 
 @frappe.whitelist()
@@ -1304,7 +1364,11 @@ def cartera_de_contacto(contact: str) -> dict:
     if ghl_id:
         customer = frappe.db.get_value("Customer", {"ghl_contact_id": ghl_id}, "name")
     if not customer:
-        return {"permitido": True, "vinculado": False}
+        # Sin Customer todavía: no se adivina el saldo, pero sí se manda el
+        # nombre para que "Nueva nota de cobro" pueda ofrecer crearlo al vuelo
+        # (`_resolver_customer`) sin que el panel tenga que volver a pedirlo.
+        nombre = frappe.db.get_value("Contact", contact, "full_name") or contact
+        return {"permitido": True, "vinculado": False, "contact": contact, "contact_name": nombre}
 
     agg = frappe.db.sql(
         """
