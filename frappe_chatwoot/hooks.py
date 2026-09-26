@@ -371,8 +371,26 @@ fixtures = [
     },
     {"dt": "Translation", "filters": [["language", "=", "es"]]},
     {"dt": "Custom DocPerm", "filters": [["parent", "in", ["CRM Deal", "User"]]]},
-    {"dt": "Web Form", "filters": [["module", "=", "Custom"]]},
 ]
+
+# Los Web Form de modulo Custom ESTUVIERON aqui hasta el 2026-09-26 y se sacaron
+# por la misma razon que los catalogos (ver abajo): el formulario de captacion
+# "solicita-una-cotización-ahora" es de lavendi.mx, no producto, y como fixture se
+# re-imponia en CADA `bench migrate` de CADA sitio. Medido el 2026-09-26:
+# medicare.lavendi.mx/solicitar-cotizacion devolvia 200 con el titulo "Solicita una
+# cotización ahora" y 10 menciones de lavendi.mx en el HTML — igual en ena y
+# estrublock. Un cliente que lo despublicara lo veia volver al siguiente migrate, y
+# mientras tanto su dominio servia un formulario que promete el contacto de OTRA
+# empresa (success_url a lavendi.mx/gracias, "Un asesor de lavendi.mx te contacta
+# hoy mismo") y cuyo lead nace a nombre de un usuario de la agencia.
+#
+# Ahora viven en fixtures/web_forms/ (fuera del barrido automatico, igual que
+# fixtures/catalogos/ y fixtures/erpnext/) y los siembra
+# utils/provisionamiento.sembrar_web_forms_una_vez() SOLO la primera vez por sitio,
+# saltando los que el sitio ya tenga y resolviendo los 3 literales de marca
+# (success_url, success_message, allowed_embedding_domains) contra site_config.json.
+# Un sitio nuevo sigue naciendo con el formulario de cotizacion funcional; uno
+# existente deja de ser pisado.
 
 # Los catalogos del embudo (CRM Deal Status / Lead Source / Lost Reason) ESTUVIERON
 # aqui hasta el 2026-09-22 y se sacaron a proposito. Eran contaminacion inversa:

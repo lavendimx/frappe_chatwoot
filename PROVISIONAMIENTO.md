@@ -12,7 +12,8 @@ que vengan). Antes de esto la propagación era a mano, sitio por sitio, y la ram
 | App `crm` (SPA + backend) | `lavendimx/crm`, rama **`lavendi-sofia`** (privado) | `bench get-app crm <url> --branch lavendi-sofia` |
 | App `frappe_chatwoot` (API, utils, agentes) | `lavendimx/frappe_chatwoot`, rama `master` | `bench get-app frappe_chatwoot <url>` |
 | 15 doctypes propios | `frappe_chatwoot/frappe_chatwoot/doctype/*` (código) | `bench migrate` los crea |
-| Campos, property setters, traducciones, permisos, Web Forms, embudo/orígenes/razones, layouts del CRM | `frappe_chatwoot/frappe_chatwoot/fixtures/*.json` | `bench migrate` los importa |
+| Campos, property setters, traducciones, permisos, layouts del CRM | `frappe_chatwoot/frappe_chatwoot/fixtures/*.json` | `bench migrate` los importa |
+| Embudo/orígenes/razones y **Web Forms** | `fixtures/catalogos/*.json`, `fixtures/web_forms/*.json` | `after_migrate`, **una sola vez por sitio** (banderas `fc_catalogos_sembrados` / `fc_web_forms_sembrados`) |
 | Lo que depende de `erpnext` (`Customer`, `Sales Invoice`, `Payment Entry`) | `frappe_chatwoot/frappe_chatwoot/fixtures/erpnext/*.json` | `after_migrate`, **solo si erpnext está instalado** |
 | Ajustes que los fixtures no pueden hacer (borrar etapas nativas, idioma por defecto) | `frappe_chatwoot/utils/provisionamiento.py` (`after_migrate`) | `bench migrate` |
 | Marca de la plataforma (nombre, logo, splash, favicon) | `frappe_chatwoot/public/images/*.png` + `provisionamiento.py` | `bench migrate` |
@@ -89,7 +90,8 @@ la usa, hay que extenderlos igual que el resto (`siteFor`/`sitesToPoll`).
 2. **Doctype nuevo o cambiado**: exportarlo a código
    (`bench --site crm.lavendi.mx execute frappe_chatwoot._exportar_doctypes.ejecutar`)
    y commit.
-3. **Campo / property setter / traducción / permiso / Web Form / layout del CRM**:
+3. **Campo / property setter / traducción / permiso / layout del CRM**
+   (los **Web Form** ya NO son fixture desde el 2026-09-26 — ver la nota de abajo):
    agregarlo a la DB de crm.lavendi.mx, luego
    `bench --site crm.lavendi.mx export-fixtures --app frappe_chatwoot` y commit.
    Los filtros viven en `hooks.py` (`fixtures = [...]`). Los **layouts** (`CRM
@@ -138,7 +140,18 @@ Detectado al actualizar sixgardens. Los tres van en `utils/provisionamiento.py`
   `fixtures/erpnext/`.
 - **Las child tables no se exportan como fixture**: al importarlas Frappe las vuelve a
   insertar y duplica los campos (pasó con `Web Form Field`: 24 → 48). Los campos de un
-  Web Form viajan dentro de `web_form.json`.
+  Web Form viajan dentro de `fixtures/web_forms/web_form.json`.
+- **Un fixture con datos de negocio contamina al cliente**: un fixture hace upsert en
+  CADA migrate, así que lo que es de lavendi.mx se re-impone sobre lo que el cliente ya
+  curó. Pasó dos veces: con el embudo (2026-09-22) y con el formulario de captación
+  (2026-09-26, `/solicitar-cotizacion` con marca de la agencia servido desde el dominio
+  de medicare, ena y estrublock). Regla: **producto** → fixture; **datos o marca** →
+  `fixtures/<carpeta>/` + siembra única por sitio con bandera en `site_config`, y los
+  literales de marca resueltos por sitio (`web_form_success_url`,
+  `web_form_success_message`, `web_form_embedding_domains`, `lead_owner_default`).
+  Lo ya contaminado se reporta con
+  `bench --site <sitio> execute frappe_chatwoot.auditar_web_forms_ajenos.ejecutar`
+  (dry-run por defecto).
 - **`get_controller`**: la clase del controlador debe llamarse igual que el doctype sin
   espacios ni guiones (`Agente IA` → `AgenteIA`). Si no, `ImportError` →
   `remove_orphan_doctypes` **borra** el doctype en el siguiente migrate.

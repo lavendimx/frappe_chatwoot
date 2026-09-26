@@ -42,6 +42,13 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    re-imponeria el branding de lavendi.mx en CADA migrate sobre cualquier
    edicion que el cliente haga a su propia nota.
 
+8. **Web Forms de captacion**: el formulario "solicita-una-cotización-ahora" es
+   de lavendi.mx (su texto de exito nombra a la agencia y su success_url manda a
+   lavendi.mx/gracias). Como fixture viajaba y se re-imponia en cada migrate de
+   cada sitio, asi que el dominio del cliente servia un formulario con marca
+   ajena. Se siembra UNA VEZ por sitio desde `fixtures/web_forms/`, saltando los
+   que el sitio ya tenga, y con esos literales resueltos por sitio.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
@@ -125,6 +132,7 @@ def ajustar_sitio():
     for paso in (
         sembrar_catalogos_una_vez,
         sembrar_print_formats_una_vez,
+        sembrar_web_forms_una_vez,
         aplicar_fixtures_erpnext,
         deduplicar_web_form_fields,
         _branding_plataforma,
@@ -227,6 +235,123 @@ def sembrar_print_formats_una_vez():
     frappe.db.set_default(BANDERA_PRINT_FORMATS, "1")
 
 
+BANDERA_WEB_FORMS = "fc_web_forms_sembrados"
+
+# El sitio de la agencia. Es el UNICO donde los literales de marca del formulario
+# de cotizacion son los correctos; en cualquier otro sitio son marca ajena.
+SITIO_AGENCIA = "crm.lavendi.mx"
+
+# El formulario de captacion. Es el unico de los Web Form que viajan con marca
+# adentro: `base-de-conocimiento` es una herramienta interna sin literales.
+WEB_FORM_COTIZACION = "solicita-una-cotización-ahora"
+
+# Campo del Web Form -> clave de `site_config.json` que lo declara por sitio.
+CLAVES_MARCA_WEB_FORM = {
+    "success_url": "web_form_success_url",
+    "success_message": "web_form_success_message",
+    "allowed_embedding_domains": "web_form_embedding_domains",
+}
+
+MENSAJE_EXITO_NEUTRO = "Recibimos tu solicitud. Te contactamos pronto."
+
+
+def sembrar_web_forms_una_vez():
+    """Siembra los Web Form del app (`fixtures/web_forms/`) — UNA SOLA VEZ por
+    sitio, saltando los que el sitio ya tenga y con la marca resuelta por sitio.
+
+    Por que no son fixtures (cambio del 2026-09-26): mismo defecto que los
+    catalogos. `{"dt": "Web Form", "filters": [["module", "=", "Custom"]]}` hacia
+    upsert en CADA `bench migrate`, asi que el formulario de captacion de
+    lavendi.mx se re-imponia en el dominio de cada cliente. Medido el 2026-09-26
+    en medicare/ena/estrublock: `/solicitar-cotizacion` servia 200 con "Solicita
+    una cotización ahora" y 10 menciones de lavendi.mx. Despublicarlo no servia de
+    nada: volvia al siguiente migrate.
+
+    Dos guardas, a diferencia de los catalogos:
+
+    1. **Por documento, no por archivo.** `import_doc` importa con `force=True` y
+       pisaria el formulario que el cliente ya haya personalizado. Aqui se inserta
+       solo el que NO existe, asi que un sitio al que ya le llego el formulario
+       (todos los actuales) no se toca: limpiarlo es decision suya, con
+       `auditar_web_forms_ajenos.py`.
+
+    2. **Los literales de marca se resuelven por sitio** (ver
+       `_parametrizar_web_form`), no se copian tal cual del fixture.
+
+    Para re-sembrar a mano un sitio concreto:
+        frappe.db.set_default("fc_web_forms_sembrados", "")  # y correr ajustar_sitio()
+    """
+    if frappe.db.get_default(BANDERA_WEB_FORMS):
+        return
+
+    ruta = os.path.join(frappe.get_app_path("frappe_chatwoot"), "fixtures", "web_forms")
+    if os.path.isdir(ruta):
+        for archivo in sorted(os.listdir(ruta)):
+            if not archivo.endswith(".json"):
+                continue
+            with open(os.path.join(ruta, archivo)) as fh:
+                registros = json.load(fh)
+            for registro in registros:
+                nombre = registro.get("name")
+                if not nombre or frappe.db.exists("Web Form", nombre):
+                    continue
+                doc = frappe.get_doc(_parametrizar_web_form(dict(registro)))
+                doc.flags.ignore_permissions = True
+                doc.insert()
+
+    frappe.db.set_default(BANDERA_WEB_FORMS, "1")
+
+
+def _parametrizar_web_form(registro):
+    """Resuelve los literales de marca del formulario de captacion para ESTE sitio.
+
+    Tres campos lo delatan cuando viaja: `success_url` (manda a lavendi.mx/gracias,
+    o sea al sitio de otra empresa), `success_message` ("Un asesor de lavendi.mx te
+    contacta hoy mismo") y `allowed_embedding_domains` (lavendi.mx, asi que el
+    cliente no puede embeberlo en el suyo y nosotros si en el nuestro).
+
+    Mismo criterio de diseno que `lib/correo.js` de `agente-ia`: se deriva de la
+    configuracion del propio sitio y, si no hay valor, se deja NEUTRO — nunca se
+    cae a la marca de la agencia. El valor del fixture sobrevive unicamente en
+    `crm.lavendi.mx`, donde esa marca si es la del sitio.
+
+    Cada sitio declara lo suyo en `site_config.json`:
+        "web_form_success_url": "https://cliente.mx/gracias",
+        "web_form_success_message": "Recibimos tu solicitud...",
+        "web_form_embedding_domains": ["cliente.mx", "www.cliente.mx"]
+    """
+    if registro.get("name") != WEB_FORM_COTIZACION:
+        return registro
+    if frappe.local.site == SITIO_AGENCIA:
+        return registro
+
+    for campo, clave in CLAVES_MARCA_WEB_FORM.items():
+        valor = frappe.conf.get(clave)
+        if valor is None:
+            valor = _neutro_web_form(campo)
+        if isinstance(valor, (list, tuple)):
+            valor = "\n".join(valor)
+        registro[campo] = valor
+    return registro
+
+
+def _neutro_web_form(campo):
+    """Que poner cuando el sitio no declaro el valor. Nunca la marca de la agencia."""
+    if campo == "success_url":
+        # Sin destino propio, el visitante se queda en el formulario leyendo
+        # `success_message`. Es la salida honesta: mandarlo a lavendi.mx/gracias
+        # seria sacarlo del sitio del cliente hacia el de otra empresa.
+        return ""
+    if campo == "success_message":
+        return MENSAJE_EXITO_NEUTRO
+    # Embebido: el unico dominio deducible sin inventar es el del propio sitio
+    # (los sitios de este bench se llaman como su host). El dominio de marketing
+    # del cliente —donde de verdad va el iframe— lo declara el en site_config.
+    # Vacio no rompe nada: `csp_embebido` cae a `frame-ancestors 'self'`.
+    propio = (frappe.local.site or "").strip()
+    return f"{propio}\nwww.{propio}" if "." in propio else ""
+
+
 def _borrar_etapas_nativas():
     for name in ETAPAS_A_BORRAR:
         if not frappe.db.exists("CRM Deal Status", name):
@@ -272,8 +397,12 @@ def aplicar_fixtures_erpnext():
 def deduplicar_web_form_fields():
     """Las child tables NO se exportan como fixture: al importarlas Frappe las
     vuelve a insertar y duplica los campos del formulario (paso el 2026-09-16 en
-    crm.lavendi.mx, 24 campos -> 48). Los campos viajan dentro de `web_form.json`.
-    Esto limpia los duplicados que ya se hayan creado; es idempotente."""
+    crm.lavendi.mx, 24 campos -> 48). Los campos viajan dentro de
+    `fixtures/web_forms/web_form.json`.
+    Esto limpia los duplicados que ya se hayan creado; es idempotente.
+
+    Se queda aunque desde el 2026-09-26 los Web Form ya no sean fixture: los
+    duplicados que el barrido repetido dejo en los sitios vivos siguen ahi."""
     filas = frappe.db.sql(
         """SELECT parent, fieldname, MIN(name) keep, COUNT(*) n
            FROM `tabWeb Form Field`
