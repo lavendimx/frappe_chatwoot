@@ -35,6 +35,7 @@ FECHA ESTIMADA
 
 import frappe
 from frappe_chatwoot.utils import plan
+from frappe_chatwoot.utils.secuencias import _marca_del_sitio
 from frappe import _
 
 from .campanas import _exigir_edicion, _puede_editar, _remitente_default, _estado as _estado_newsletter
@@ -272,7 +273,7 @@ def redactar_paso(campana, nombre_paso, subject, contenido, content_type="HTML")
     nl = frappe.new_doc("Newsletter")
     nl.subject = subject
     nl.sender_email = doc.remitente_email or _remitente_default()
-    nl.sender_name = doc.remitente_nombre or "lavendi.mx"
+    nl.sender_name = doc.remitente_nombre or _marca_del_sitio() or "lavendi.mx"
     nl.content_type = content_type
     if content_type == "HTML":
         nl.message_html = contenido

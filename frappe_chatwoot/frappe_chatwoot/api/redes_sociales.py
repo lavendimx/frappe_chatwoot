@@ -50,6 +50,7 @@ import frappe
 import requests
 
 from frappe_chatwoot.frappe_chatwoot.api.chatwoot import validate_role
+from frappe_chatwoot.utils.plan import exigir_plan_minimo
 
 API = "https://api.ayrshare.com/api"
 TIMEOUT = 20
@@ -89,6 +90,10 @@ def estado() -> dict:
     No llama a Ayrshare si todavía no hay perfil creado (ayrshare_profile_key
     vacío) — no hay nada que consultar y así no se choca con el gate del
     Business Plan solo por abrir la pantalla."""
+    # Redes sociales es capacidad de Lite+ (D-4, 2026-09-27): un sitio Gratuito
+    # no debe ni leer el estado de una config que no pagó. El gate va primero,
+    # antes de tocar `Redes Sociales`, y no aplica a la agencia.
+    exigir_plan_minimo("lite")
     validate_role()
     cfg = _cfg()
     if not cfg.enabled:
@@ -155,6 +160,11 @@ def generar_link_conexion() -> dict:
     """Devuelve el link hospedado de Ayrshare donde el usuario conecta sus
     cuentas de redes sociales para el perfil de este sitio. Crea el perfil
     en Ayrshare si todavía no existe (ver _crear_perfil_si_falta)."""
+    # Punto de entrada REAL de la conexión, no cosmético: sin esto un sitio
+    # Gratuito con las credenciales puestas conectaría sus redes sin pagar la
+    # capacidad (D-4, 2026-09-27). `_crear_perfil_si_falta` solo se alcanza
+    # desde aquí, así que el gate cubre también la creación del perfil.
+    exigir_plan_minimo("lite")
     validate_role()
     cfg = _cfg()
     if not cfg.enabled:

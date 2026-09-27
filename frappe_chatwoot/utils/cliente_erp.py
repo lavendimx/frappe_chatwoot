@@ -83,7 +83,15 @@ def _asegurar_customer(doc) -> "frappe.model.document.Document | None":
     Devuelve el Customer (nuevo o ya existente) o `None` si no se pudo crear
     (sin nombre utilizable). Público dentro del módulo para que el fix puntual
     y las pruebas reusen exactamente esta misma ruta.
+
+    Sin `erpnext` instalado no existe el doctype `Customer`: se retorna aquí
+    temprano (cubre tanto el doc_event como cualquier llamada directa) para no
+    dejar `Error Log` ni escribir un `ghl_contact_id` sintético en sitios que no
+    lo usan.
     """
+    if "erpnext" not in frappe.get_installed_apps():
+        return None
+
     ghl_id = (doc.get("ghl_contact_id") or "").strip()
     if ghl_id:
         existente = frappe.db.get_value("Customer", {"ghl_contact_id": ghl_id}, "name")
