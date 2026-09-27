@@ -9,10 +9,18 @@ features, sin límite de usuarios ni de registros en ninguno.
 
 La señal de "en qué plan está este sitio" vive en `site_config.json`
 (`sofia_plan` = "gratuito" | "lite" | "pro" | "enterprise"), NUNCA en código ni en un
-doctype: un sitio sin esa llave (crm.lavendi.mx, estrublock.lavendi.mx a la fecha de
-este archivo) se trata como **enterprise** — el default es el más permisivo a
-propósito, para que ningún cliente que ya paga por una función deje de verla porque
-le faltó una llave de config. Solo se restringe a quien se marca explícitamente.
+doctype. El default es **fail-closed**: un sitio sin esa llave —o con un valor que no
+está en `NIVELES`— se trata como **gratuito**, el nivel más bajo. Nunca sobre-otorga.
+
+Cambio del 2026-09-27 (D-1 del registro de capacidades): antes el default era
+**enterprise** (fail-open), "para que a nadie que ya paga se le bajara una función por
+una llave que faltó" — pero eso restringía solo a quien se marcaba a mano, y los sitios
+mal provisionados heredaban el nivel más permisivo. La precaución verificada antes de
+invertirlo: ningún sitio existente dependía del default viejo (los 8 sitios de cliente
+ya declaran `lite`, `crm`/`sofiav2` son `enterprise`, el único sin llave es
+`erp-prueba.local`, laboratorio). `provisionamiento._plan_del_sitio` ahora escribe la
+llave al alta con default restrictivo (D-5/O2) para que no vuelva a depender de que
+alguien la ponga a mano.
 
 "Gratuito" hereda todo lo que bloquea "lite" (Secuencias, Campañas, Agente IA,
 Cobranza) por estar más abajo en `NIVELES` — no necesita gates propios. Además,
@@ -37,7 +45,10 @@ def plan_de_este_sitio():
     plan = frappe.conf.get("sofia_plan")
     if plan in NIVELES:
         return plan
-    return "enterprise"
+    # Fail-closed (2026-09-27, D-1): sin llave o con valor desconocido, el nivel
+    # más bajo. Antes era "enterprise", que sobre-otorgaba permiso a cualquier
+    # sitio mal provisionado.
+    return "gratuito"
 
 
 def _es_agencia(user=None):
@@ -51,8 +62,9 @@ def _nivel_index(plan):
     try:
         return NIVELES.index(plan)
     except ValueError:
-        # Valor desconocido en site_config: no bloquear por un typo de config.
-        return len(NIVELES) - 1
+        # Valor desconocido en site_config: fail-closed, el nivel más bajo — no
+        # sobre-otorgar por un typo de config. (Antes devolvía enterprise.)
+        return NIVELES.index("gratuito")
 
 
 def exigir_plan_minimo(minimo, mensaje=None, user=None):

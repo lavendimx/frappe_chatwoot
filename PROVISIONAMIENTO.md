@@ -15,6 +15,7 @@ que vengan). Antes de esto la propagación era a mano, sitio por sitio, y la ram
 | Campos, property setters, traducciones, permisos, Web Forms, embudo/orígenes/razones, layouts del CRM | `frappe_chatwoot/frappe_chatwoot/fixtures/*.json` | `bench migrate` los importa |
 | Lo que depende de `erpnext` (`Customer`, `Sales Invoice`, `Payment Entry`) | `frappe_chatwoot/frappe_chatwoot/fixtures/erpnext/*.json` | `after_migrate`, **solo si erpnext está instalado** |
 | Ajustes que los fixtures no pueden hacer (borrar etapas nativas, idioma por defecto) | `frappe_chatwoot/utils/provisionamiento.py` (`after_migrate`) | `bench migrate` |
+| Plan del sitio (`sofia_plan`, categoría C1) | `site_config.json`, escrito por `provisionamiento._plan_del_sitio()` | `bench migrate` (default restrictivo `gratuito`) |
 | Marca de la plataforma (nombre, logo, splash, favicon) | `frappe_chatwoot/public/images/*.png` + `provisionamiento.py` | `bench migrate` |
 | Usuario de servicio del agente (`agente-ia@lavendi.mx`) | `provisionamiento.py` (usuario; la API key es manual) | `bench migrate` |
 | Agente IA (motor Node) | repo `agente-ia` (rama `master`) | `pm2 restart agente-ia-chatwoot` |
@@ -43,6 +44,13 @@ orden (sus dependencias van en `fixtures/erpnext/`, que se importan solas si est
 El `migrate` deja el sitio listo **salvo lo que es decisión por cliente**: marca propia
 (si la quiere), inbox de Chatwoot + número de WhatsApp, `Chatwoot Settings` (tokens de
 agenda y onboarding), KB sources, plantillas, y encender el agente.
+
+⚠ **`sofia_plan`**: el `migrate` lo escribe con el default restrictivo `gratuito` y deja
+un `Error Log` ("provisionamiento: plan por default"). Hay que declarar el plan real en
+`site_config.json` (`bench --site <sitio> set-config sofia_plan lite`) o pasarlo al alta
+(`ajustar_sitio(plan="lite")`) — si no, el sitio queda bloqueado en el nivel más bajo.
+Un sitio ya declarado no se pisa (idempotente). `lead_owner_default` y `brand_*` NO se
+escriben solos: exigen un dato humano y van a mano (ver §5 del registro de capacidades).
 
 ### DNS, vhost y el header que no se puede olvidar
 

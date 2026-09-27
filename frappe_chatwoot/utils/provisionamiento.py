@@ -54,6 +54,13 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    ajena. Se siembra UNA VEZ por sitio desde `fixtures/web_forms/`, saltando los
    que el sitio ya tenga, y con esos literales resueltos por sitio.
 
+9. **Plan del sitio** (`sofia_plan`): la llave que define el producto del sitio
+   (categoria C1 del registro de capacidades) no la escribia nadie — se ponia a
+   mano y 9 de 11 sitios no la tenian. `_plan_del_sitio()` la declara al alta con
+   default RESTRICTIVO `gratuito` (D-5/O2) y deja un Error Log audible para que el
+   operador declare el plan real. No escribe `lead_owner_default` ni `brand_*`:
+   esos exigen un dato humano y un default inventado crearia una identidad falsa.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
@@ -168,8 +175,15 @@ VISTAS_CLIENTE = [
 ]
 
 
-def ajustar_sitio():
-    """Punto de entrada de `after_migrate`. Nunca lanza."""
+def ajustar_sitio(plan=None):
+    """Punto de entrada de `after_migrate`. Nunca lanza.
+
+    `plan` es opcional (D-5, 2026-09-27): el alta puede declarar el plan del
+    sitio explícitamente —`ajustar_sitio(plan="lite")`—; si no lo pasa y el
+    sitio no declara `sofia_plan`, `_plan_del_sitio` aplica el default
+    restrictivo `gratuito` y lo deja en el Error Log para que el operador lo
+    corrija. Nunca se hereda permiso por omisión.
+    """
     for paso in (
         sembrar_catalogos_una_vez,
         sembrar_print_formats_una_vez,
@@ -184,9 +198,14 @@ def ajustar_sitio():
         _dropdown_items_plataforma,
         _usuario_servicio_agente,
         _vapid_push,
+        _plan_del_sitio,
     ):
         try:
-            paso()
+            # El unico paso parametrizable: recibe el plan explicito del alta.
+            if paso is _plan_del_sitio:
+                paso(plan)
+            else:
+                paso()
             frappe.db.commit()
         except Exception:
             frappe.db.rollback()
@@ -628,6 +647,75 @@ def _app_por_defecto():
     if frappe.get_system_settings("default_app"):
         return
     frappe.db.set_single_value("System Settings", "default_app", "crm")
+
+
+# Clave del plan del sitio (categoria C1). La lee `utils/plan.py`; su default
+# cambio a fail-closed `gratuito` el 2026-09-27 (D-1), en paralelo a que este
+# paso empieza a escribirla (D-5/Fase 3).
+CLAVE_PLAN = "sofia_plan"
+PLAN_DEFAULT = "gratuito"
+
+
+def _escribir_site_config(clave, valor):
+    """Escribe una llave en `site_config.json` del sitio actual.
+
+    El archivo hasta ahora solo LEIA `frappe.conf`; para Escribir de verdad se
+    usa la API estandar de Frappe (`frappe.installer.update_site_config`), la
+    misma que usan los patches del bench — no se inventa una via nueva.
+    """
+    from frappe.installer import update_site_config
+
+    update_site_config(clave, valor)
+    # `update_site_config` reescribe el JSON pero NO refresca el `frappe.conf`
+    # ya cargado en este proceso: sin esto, el mismo `after_migrate` que acaba
+    # de declarar el plan seguiria leyendo el default hasta el siguiente request.
+    frappe.conf[clave] = valor
+
+
+def _plan_del_sitio(plan=None):
+    """Declara `sofia_plan` en `site_config.json` al alta (D-5, categoria C1).
+
+    Idempotente: si el sitio YA declara la llave, no la toca — un operador que
+    corrigio el plan a mano no se pisa en cada `bench migrate`.
+
+    `plan` es opcional. El alta puede pasarlo explicito
+    (`ajustar_sitio(plan="lite")`). Si no se pasa y el sitio no tiene la llave,
+    se aplica el default RESTRICTIVO `gratuito` (decision D-5/O2, Alejandro
+    2026-09-27) y se deja un `Error Log` audible para que el operador lo
+    corrija: el sitio nace bloqueado, nunca sobre-otorgado. Un valor explicito
+    que no este en `NIVELES` se rechaza igual de ruidosamente y NO se escribe
+    (el sitio se queda con el default fail-closed de `plan.py`).
+
+    No se escribe `lead_owner_default` ni `brand_*` aqui: exigen un dato humano
+    (el dueno de negocio / la marca del cliente) y un default inventado crearia
+    una identidad falsa. Se declaran a mano en el alta (ver §5 del registro de
+    capacidades y `RUNBOOK-ALTA-CLIENTE.md`).
+    """
+    from frappe_chatwoot.utils.plan import NIVELES
+
+    if frappe.conf.get(CLAVE_PLAN):
+        return
+
+    if plan:
+        if plan not in NIVELES:
+            frappe.log_error(
+                f"Sitio {frappe.local.site}: sofia_plan explicito invalido ({plan!r}); "
+                f"validos: {', '.join(NIVELES)}. No se escribio; el sitio queda en el "
+                f"default fail-closed '{PLAN_DEFAULT}'.",
+                "provisionamiento: plan invalido",
+            )
+            return
+        declarado = plan
+    else:
+        declarado = PLAN_DEFAULT
+        frappe.log_error(
+            f"Sitio {frappe.local.site} sin sofia_plan: se aplico el default "
+            f"restrictivo '{PLAN_DEFAULT}'. Declara el plan real del cliente "
+            f"(site_config.sofia_plan) para que el gate no lo deje bloqueado.",
+            "provisionamiento: plan por default",
+        )
+
+    _escribir_site_config(CLAVE_PLAN, declarado)
 
 
 def _dropdown_items_plataforma():
