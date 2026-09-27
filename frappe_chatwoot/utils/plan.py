@@ -80,6 +80,72 @@ def exigir_enterprise(mensaje=None):
     exigir_plan_minimo("enterprise", mensaje)
 
 
+# Campos de `FCRM Settings` que son de la plataforma, no del cliente: la marca del
+# producto (los escribe Ajustes > Marca) y el menu de usuario (lo edita Ajustes >
+# Home Actions, la MISMA tabla `dropdown_items` donde ocultamos "Apps"/"About").
+CAMPOS_DE_PLATAFORMA = ("brand_name", "brand_logo", "favicon", "dropdown_items")
+
+
+def proteger_campos_de_plataforma(doc, method=None):
+    """doc_event `validate` de `FCRM Settings`: un cliente Lite/Gratuito no edita
+    la marca ni el menu de usuario.
+
+    Por que: `BrandSettings.vue` escribe `FCRM Settings.{brand_name,brand_logo,
+    favicon}` y `HomeActions.vue` edita `dropdown_items` -- exactamente los campos
+    que fija la plataforma. Un Sales Manager de un sitio Lite podia borrar el logo
+    de Sofía o volver a meter los items de menu que ocultamos
+    (`provisionamiento._dropdown_items_plataforma`). La UI ya los esconde por plan
+    (`Settings.vue`, candado visual); esto es el candado REAL, por si se llama la
+    API directa.
+
+    Nunca estorba a la agencia (System Manager / `_es_agencia`), ni en migracion,
+    install o import -- ahi corre el propio provisionamiento, que si toca esos
+    campos a proposito. Reportado por Alejandro el 2026-09-26.
+    """
+    if (
+        frappe.flags.in_migrate
+        or frappe.flags.in_install
+        or frappe.flags.in_patch
+        or frappe.flags.in_import
+    ):
+        return
+    if _es_agencia():
+        return
+    if _nivel_index(plan_de_este_sitio()) >= _nivel_index("pro"):
+        return
+    if _toco_campos_de_plataforma(doc):
+        frappe.throw(
+            _("Los ajustes de marca y el menú de usuario son parte de Sofía GPT y no se editan en tu plan actual."),
+            frappe.PermissionError,
+        )
+
+
+def _firma_dropdown(doc):
+    """Huella del menu de usuario (`dropdown_items`): que items hay, en que orden,
+    con que etiqueta/ruta y si estan ocultos.
+
+    No se compara la child table con `dict != dict`: `Document.__eq__` es por
+    identidad, asi que dos cargas distintas del MISMO menu salen desiguales y el
+    guard bloquearia cualquier guardado de `FCRM Settings`, aunque no tocara el
+    menu (bug real detectado al probar: `service_provider` daba 403)."""
+    return tuple(
+        (d.name1, d.label, d.route, int(d.hidden or 0))
+        for d in (doc.get("dropdown_items") or [])
+    )
+
+
+def _toco_campos_de_plataforma(doc):
+    """Si ESTE guardado cambia marca o menu de usuario. Los escalares (marca) van
+    por `has_value_changed`; la child table, por huella."""
+    escalares = ("brand_name", "brand_logo", "favicon")
+    if any(doc.has_value_changed(c) for c in escalares):
+        return True
+    antes = doc.get_doc_before_save()
+    if not antes:
+        return bool(doc.get("dropdown_items"))
+    return _firma_dropdown(doc) != _firma_dropdown(antes)
+
+
 def _condicion_nivel(minimo, user):
     if _es_agencia(user):
         return ""
