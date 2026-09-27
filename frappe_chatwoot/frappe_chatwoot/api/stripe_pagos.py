@@ -86,9 +86,35 @@ def _url_publica() -> str:
     que es el nombre interno del sitio y no resuelve desde fuera del servidor
     (se comprobó en el Checkout real: el botón "volver" apuntaba ahí). El
     dominio público del CRM es otro, y es el único que le sirve al cliente.
+
+    Cada sitio declara el suyo en `Stripe Settings.url_publica`. Hasta el
+    2026-09-26 el default era `https://sofiav2.lavendi.mx` —el dominio público
+    de la agencia— escrito dos veces: aquí y en el `default` del Custom Field
+    `Stripe Settings-url_publica`, que viaja por fixture. O sea que un cliente
+    con erpnext instalado nacía con el campo ya pre-llenado apuntando a nuestro
+    dominio, y su comprador, al terminar de pagar, habría aterrizado en el CRM
+    de otra empresa. Hoy es latente (ningún sitio de cliente tiene erpnext, así
+    que `Stripe Settings` no existe ahí), pero se activaba solo el día de la
+    primera instalación. Se quitaron los dos literales; el fallback ahora es el
+    dominio del propio sitio, que nunca es el de la agencia salvo en la agencia.
+
+    En crm.lavendi.mx no cambia nada: su `url_publica` está declarada
+    explícitamente (`https://sofiav2.lavendi.mx`, verificado en su `tabSingles`
+    el 2026-09-26), así que este fallback no corre ahí.
     """
     cfg = _cfg()
-    return (cfg.url_publica or "https://sofiav2.lavendi.mx").rstrip("/")
+    declarada = (cfg.url_publica or "").strip()
+    if declarada:
+        return declarada.rstrip("/")
+
+    # Sin declarar: el propio host del sitio. Puede no ser su dominio público
+    # definitivo, pero es del cliente — mandarlo a sofiav2 nunca lo es.
+    sitio = (frappe.local.site or "").strip()
+    if not sitio:
+        frappe.throw(
+            "Falta la URL pública del CRM: declárala en Stripe Settings → "
+            "«URL pública del CRM».")
+    return f"https://{sitio}"
 
 
 def _clave(cfg=None) -> str:

@@ -514,10 +514,30 @@ def enviar_bienvenidas():
                  "creation": ["<=", limite]},
         fields=["name"], limit=LOTE_MAX, order_by="creation asc")
 
+    if not pendientes:
+        return
+
+    # Sin bandeja declarada NO se manda nada. Se corta aqui, antes del bucle, a
+    # proposito: el `except` de abajo marca `bienvenida_enviada_at` para que un
+    # numero invalido no reintente eternamente, asi que dejar caer el error por
+    # ahi quemaria las solicitudes pendientes por un error de configuracion que
+    # se arregla en un minuto. Cortando antes, en cuanto alguien declare
+    # `inbox_formulario` la siguiente corrida las manda todas.
+    inbox_id = _inbox_formulario()
+    if not inbox_id:
+        frappe.log_error(
+            f"{len(pendientes)} solicitud(es) esperando bienvenida, pero este "
+            "sitio no declaro `Chatwoot Settings.inbox_formulario`. No se envia "
+            "ninguna: hasta el 2026-09-26 el codigo caia al inbox 5, que es el "
+            "de crm.lavendi.mx, y el mensaje habria salido por el WhatsApp de "
+            "la agencia. Declarar la bandeja propia del sitio para destrabarlas.",
+            "Solicitud Web: sin inbox_formulario")
+        return
+
     for fila in pendientes:
         doc = frappe.get_doc("Solicitud Web", fila.name)
         try:
-            _enviar_bienvenida(doc)
+            _enviar_bienvenida(doc, inbox_id)
             doc.db_set("bienvenida_enviada_at", frappe.utils.now(), update_modified=False)
         except Exception as exc:
             frappe.log_error(f"bienvenida {doc.name}: {exc}", "Solicitud Web")
@@ -528,11 +548,38 @@ def enviar_bienvenidas():
     frappe.db.commit()
 
 
-def _enviar_bienvenida(doc):
+def _inbox_formulario():
+    """Bandeja de Chatwoot por la que sale la bienvenida de ESTE sitio.
+
+    Devuelve 0 si el sitio no la declaro, y eso significa "no enviar".
+
+    Hasta el 2026-09-26 esto terminaba en `or 5`, y el 5 es la bandeja de
+    WhatsApp de crm.lavendi.mx. O sea: cualquier sitio que encendiera
+    `bienvenida_formulario_activa` sin declarar su propia bandeja le habria
+    escrito a SU prospecto desde el numero de la agencia, y la conversacion
+    habria aterrizado en la bandeja de la agencia — fuga cross-tenant en los dos
+    sentidos. Medido ese dia: solo crm (5) y medicare (13) tenian bandeja propia;
+    sixgardens y estrublock la tenian en 0 y ena/eeplv/resanic ni siquiera tenian
+    la fila de `Chatwoot Settings`. Los 5 habrian salido por el 5. Estaba apagado
+    en todos, que es lo unico que evito el incidente.
+
+    No hay default posible: la bandeja correcta de un sitio no se puede deducir,
+    se declara. Callar y no enviar es el unico comportamiento seguro.
+    """
+    return frappe.utils.cint(
+        getattr(frappe.get_single("Chatwoot Settings"), "inbox_formulario", 0))
+
+
+def _enviar_bienvenida(doc, inbox_id=None):
     from ..frappe_chatwoot.api import panel
 
-    inbox_id = frappe.utils.cint(getattr(frappe.get_single("Chatwoot Settings"),
-                                         "inbox_formulario", 0)) or 5
+    # El llamador normal (`enviar_bienvenidas`) ya resolvio y valido la bandeja.
+    # Se revalida aqui para que ninguna ruta futura pueda enviar sin bandeja.
+    inbox_id = frappe.utils.cint(inbox_id) or _inbox_formulario()
+    if not inbox_id:
+        frappe.throw(
+            "Este sitio no declaro `Chatwoot Settings.inbox_formulario`: no hay "
+            "bandeja propia por la cual mandar la bienvenida.")
     etiquetas = _etiquetas(doc)
     saludo = SALUDO.format(nombre=(doc.nombre or "").split(" ")[0],
                            productos="\n".join(etiquetas) or "No especificado")

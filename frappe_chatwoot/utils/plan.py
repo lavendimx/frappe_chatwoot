@@ -9,10 +9,18 @@ features, sin límite de usuarios ni de registros en ninguno.
 
 La señal de "en qué plan está este sitio" vive en `site_config.json`
 (`sofia_plan` = "gratuito" | "lite" | "pro" | "enterprise"), NUNCA en código ni en un
-doctype: un sitio sin esa llave (crm.lavendi.mx, estrublock.lavendi.mx a la fecha de
-este archivo) se trata como **enterprise** — el default es el más permisivo a
-propósito, para que ningún cliente que ya paga por una función deje de verla porque
-le faltó una llave de config. Solo se restringe a quien se marca explícitamente.
+doctype. El default es **fail-closed**: un sitio sin esa llave —o con un valor que no
+está en `NIVELES`— se trata como **gratuito**, el nivel más bajo. Nunca sobre-otorga.
+
+Cambio del 2026-09-27 (D-1 del registro de capacidades): antes el default era
+**enterprise** (fail-open), "para que a nadie que ya paga se le bajara una función por
+una llave que faltó" — pero eso restringía solo a quien se marcaba a mano, y los sitios
+mal provisionados heredaban el nivel más permisivo. La precaución verificada antes de
+invertirlo: ningún sitio existente dependía del default viejo (los 8 sitios de cliente
+ya declaran `lite`, `crm`/`sofiav2` son `enterprise`, el único sin llave es
+`erp-prueba.local`, laboratorio). `provisionamiento._plan_del_sitio` ahora escribe la
+llave al alta con default restrictivo (D-5/O2) para que no vuelva a depender de que
+alguien la ponga a mano.
 
 "Gratuito" hereda todo lo que bloquea "lite" (Secuencias, Campañas, Agente IA,
 Cobranza) por estar más abajo en `NIVELES` — no necesita gates propios. Además,
@@ -37,7 +45,10 @@ def plan_de_este_sitio():
     plan = frappe.conf.get("sofia_plan")
     if plan in NIVELES:
         return plan
-    return "enterprise"
+    # Fail-closed (2026-09-27, D-1): sin llave o con valor desconocido, el nivel
+    # más bajo. Antes era "enterprise", que sobre-otorgaba permiso a cualquier
+    # sitio mal provisionado.
+    return "gratuito"
 
 
 def _es_agencia(user=None):
@@ -51,8 +62,9 @@ def _nivel_index(plan):
     try:
         return NIVELES.index(plan)
     except ValueError:
-        # Valor desconocido en site_config: no bloquear por un typo de config.
-        return len(NIVELES) - 1
+        # Valor desconocido en site_config: fail-closed, el nivel más bajo — no
+        # sobre-otorgar por un typo de config. (Antes devolvía enterprise.)
+        return NIVELES.index("gratuito")
 
 
 def exigir_plan_minimo(minimo, mensaje=None, user=None):
@@ -78,6 +90,72 @@ def exigir_no_lite(mensaje=None):
 def exigir_enterprise(mensaje=None):
     """Llamadas / voz IA y migración de histórico — exclusivo de Enterprise."""
     exigir_plan_minimo("enterprise", mensaje)
+
+
+# Campos de `FCRM Settings` que son de la plataforma, no del cliente: la marca del
+# producto (los escribe Ajustes > Marca) y el menu de usuario (lo edita Ajustes >
+# Home Actions, la MISMA tabla `dropdown_items` donde ocultamos "Apps"/"About").
+CAMPOS_DE_PLATAFORMA = ("brand_name", "brand_logo", "favicon", "dropdown_items")
+
+
+def proteger_campos_de_plataforma(doc, method=None):
+    """doc_event `validate` de `FCRM Settings`: un cliente Lite/Gratuito no edita
+    la marca ni el menu de usuario.
+
+    Por que: `BrandSettings.vue` escribe `FCRM Settings.{brand_name,brand_logo,
+    favicon}` y `HomeActions.vue` edita `dropdown_items` -- exactamente los campos
+    que fija la plataforma. Un Sales Manager de un sitio Lite podia borrar el logo
+    de Sofía o volver a meter los items de menu que ocultamos
+    (`provisionamiento._dropdown_items_plataforma`). La UI ya los esconde por plan
+    (`Settings.vue`, candado visual); esto es el candado REAL, por si se llama la
+    API directa.
+
+    Nunca estorba a la agencia (System Manager / `_es_agencia`), ni en migracion,
+    install o import -- ahi corre el propio provisionamiento, que si toca esos
+    campos a proposito. Reportado por Alejandro el 2026-09-26.
+    """
+    if (
+        frappe.flags.in_migrate
+        or frappe.flags.in_install
+        or frappe.flags.in_patch
+        or frappe.flags.in_import
+    ):
+        return
+    if _es_agencia():
+        return
+    if _nivel_index(plan_de_este_sitio()) >= _nivel_index("pro"):
+        return
+    if _toco_campos_de_plataforma(doc):
+        frappe.throw(
+            _("Los ajustes de marca y el menú de usuario son parte de Sofía GPT y no se editan en tu plan actual."),
+            frappe.PermissionError,
+        )
+
+
+def _firma_dropdown(doc):
+    """Huella del menu de usuario (`dropdown_items`): que items hay, en que orden,
+    con que etiqueta/ruta y si estan ocultos.
+
+    No se compara la child table con `dict != dict`: `Document.__eq__` es por
+    identidad, asi que dos cargas distintas del MISMO menu salen desiguales y el
+    guard bloquearia cualquier guardado de `FCRM Settings`, aunque no tocara el
+    menu (bug real detectado al probar: `service_provider` daba 403)."""
+    return tuple(
+        (d.name1, d.label, d.route, int(d.hidden or 0))
+        for d in (doc.get("dropdown_items") or [])
+    )
+
+
+def _toco_campos_de_plataforma(doc):
+    """Si ESTE guardado cambia marca o menu de usuario. Los escalares (marca) van
+    por `has_value_changed`; la child table, por huella."""
+    escalares = ("brand_name", "brand_logo", "favicon")
+    if any(doc.has_value_changed(c) for c in escalares):
+        return True
+    antes = doc.get_doc_before_save()
+    if not antes:
+        return bool(doc.get("dropdown_items"))
+    return _firma_dropdown(doc) != _firma_dropdown(antes)
 
 
 def _condicion_nivel(minimo, user):

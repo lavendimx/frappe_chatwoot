@@ -208,6 +208,13 @@ doc_events = {
         "after_insert": "frappe_chatwoot.utils.tareas.notificar_asignacion",
         "on_update": "frappe_chatwoot.utils.tareas.notificar_asignacion",
     },
+    # FCRM Settings: la marca del producto y el menu de usuario son de la
+    # plataforma -- un cliente Lite/Gratuito no los edita. La UI ya los oculta por
+    # plan (Settings.vue); esto cierra la via de la API directa. Ver
+    # utils/plan.py:proteger_campos_de_plataforma.
+    "FCRM Settings": {
+        "validate": "frappe_chatwoot.utils.plan.proteger_campos_de_plataforma",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -219,8 +226,8 @@ doc_events = {
 # Sin esto, un Sales User de un sitio Lite podía entrar a Secuencias, Campañas
 # de email, Llamadas y a la config del Agente IA con la URL directa — verificado
 # en vivo el 2026-09-25 en Six Gardens. Ver utils/plan.py: el nivel del sitio
-# vive en site_config.json (`sofia_plan`), default "enterprise" si no está
-# definida — un sitio sin esa llave no queda afectado.
+# vive en site_config.json (`sofia_plan`), default fail-closed "gratuito" desde
+# el 2026-09-27 (D-1) — un sitio sin esa llave queda restringido, no exento.
 #
 # "CRM Call Log" es el doctype nativo de Frappe CRM para el módulo "Llamadas"
 # (app `crm`, no nuestro) — Enterprise-only en la tabla de planes nueva, por

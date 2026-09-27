@@ -1374,7 +1374,7 @@
   "collapsible": 0,
   "collapsible_depends_on": null,
   "columns": 0,
-  "default": "https://sofiav2.lavendi.mx",
+  "default": null,
   "depends_on": null,
   "description": null,
   "docstatus": 0,

@@ -14,10 +14,15 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    sitio sin erpnext se quedaria sin NINGUN campo. Viven en `fixtures/erpnext/` y
    se importan aqui solo si erpnext esta instalado.
 
-3. **Marca de la plataforma**: un sitio nuevo nace diciendo "Frappe" y sin logo
-   (el SPA del CRM referencia `/files/sofia-logo.png`, que sin el archivo sale
-   roto). Aqui se copian los PNG que viajan con el app y se llena `Website
-   Settings` — solo si el sitio sigue en el default, para no pisar marca propia.
+3. **Marca de la plataforma**: un sitio nuevo nace diciendo "Frappe" y sin logo.
+   Aqui se llena `Website Settings` y `FCRM Settings` — solo si el sitio sigue en
+   el default, para no pisar marca propia. Desde el 2026-09-26 el valor NO es una
+   constante: lo resuelve `branding_de_sitio()` contra `site_config.json`
+   (`brand_app_name`, `brand_logo`, `brand_splash_image`, `brand_favicon`) y sin
+   esas claves queda neutro —nombre deducido del host, visuales nativos de
+   Frappe—, nunca "Sofía GPT by lavendi.mx" ni los PNG de la agencia. Antes se
+   escribia la marca de lavendi.mx en CADA sitio y en CADA migrate: los 6 sitios
+   de cliente la tenian puesta (medido en su `tabSingles`).
 
 4. **Usuario de servicio del agente**: `agente-ia@lavendi.mx` es con quien el
    proceso Node se autentica contra CADA sitio. Se crea si falta; su API key NO
@@ -49,6 +54,13 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
    ajena. Se siembra UNA VEZ por sitio desde `fixtures/web_forms/`, saltando los
    que el sitio ya tenga, y con esos literales resueltos por sitio.
 
+9. **Plan del sitio** (`sofia_plan`): la llave que define el producto del sitio
+   (categoria C1 del registro de capacidades) no la escribia nadie — se ponia a
+   mano y 9 de 11 sitios no la tenian. `_plan_del_sitio()` la declara al alta con
+   default RESTRICTIVO `gratuito` (D-5/O2) y deja un Error Log audible para que el
+   operador declare el plan real. No escribe `lead_owner_default` ni `brand_*`:
+   esos exigen un dato humano y un default inventado crearia una identidad falsa.
+
 Todo es idempotente y cada paso va en su propio try/except con su propio commit:
 si uno falla no debe revertir lo que ya hizo el otro (paso real — un rename que
 choca hacia que se perdieran los borrados de la misma corrida).
@@ -57,6 +69,7 @@ choca hacia que se perdieran los borrados de la misma corrida).
 import base64
 import json
 import os
+import re
 import shutil
 
 import frappe
@@ -64,15 +77,36 @@ import frappe
 USUARIO_SERVICIO = "agente-ia@lavendi.mx"
 VAPID_SUBJECT_DEFAULT = "mailto:contacto@lavendi.mx"
 
-# Marca de la plataforma (mismos valores que crm.lavendi.mx). `splash_image` es la
-# pantalla post-login; `favicon` la pestana; `app_logo` el logo del login/menu.
-BRANDING = {
+# Marca de la plataforma. `splash_image` es la pantalla post-login; `favicon` la
+# pestana; `app_logo` el logo del login/menu.
+#
+# Hasta el 2026-09-26 esto era un dict constante (`BRANDING`) que
+# `_branding_plataforma` escribia TAL CUAL en cualquier sitio, asi que los 6
+# sitios de cliente nacian —y se re-imponian en cada migrate— diciendo "Sofía GPT
+# by lavendi.mx" con el logo y el favicon de la agencia. Medido ese dia en el
+# `tabSingles` de los 6 (sixgardens, estrublock, medicare, ena, eeplv, resanic):
+# los 4 campos de `Website Settings` y los 3 de `FCRM Settings`, identicos a los
+# de la agencia. Es la fuga de marca mas visible que teniamos: el cliente entra a
+# SU CRM y lee el nombre de otra empresa en la pestana, el login y el menu.
+#
+# Ahora se resuelve por sitio (`branding_de_sitio`): estos literales sobreviven
+# solo en el sitio de la agencia, y cualquier otro los declara en su
+# `site_config.json` o se queda NEUTRO.
+BRANDING_AGENCIA = {
     "app_name": "Sofía GPT by lavendi.mx",
     "app_logo": "/files/sofia-logo.png",
     "splash_image": "/files/sofia-logo.png",
     "favicon": "/files/sofia-favicon.png",
 }
 ARCHIVOS_MARCA = ("sofia-logo.png", "sofia-favicon.png")
+
+# Campo de marca -> clave de `site_config.json` que lo declara por sitio.
+CLAVES_MARCA_SITIO = {
+    "app_name": "brand_app_name",
+    "app_logo": "brand_logo",
+    "splash_image": "brand_splash_image",
+    "favicon": "brand_favicon",
+}
 
 ETAPAS_A_BORRAR = [
     "Futuras",
@@ -85,6 +119,20 @@ ETAPAS_A_BORRAR = [
 VIEJO, NUEVO = "4to Seguiiento", "4to Seguimiento"
 
 WEB_FORMS_CON_DUPLICADOS = ["base-de-conocimiento", "solicita-una-cotización-ahora"]
+
+# Items del menu de usuario (`FCRM Settings.dropdown_items`) que no deben verse en
+# ningun sitio de Sofía, ni de cliente ni de la agencia. "Apps" (`app_selector`) es
+# el conmutador de apps de Frappe: en un sitio que ES un solo producto (el CRM)
+# solo saca al usuario del flujo. "About" expone el modal de Frappe CRM (version,
+# creditos) que no le dice nada al cliente y ademas nombra a un tercero.
+# Se marcan `hidden=1` en vez de borrarlos: son `is_standard`, `sync_table()` del
+# propio crm los re-crearia en cada after_migrate, y su `validate()` prohibe
+# borrarlos. Ocultar sobrevive a `sync_table` porque esa funcion solo AGREGA los
+# que faltan y no reescribe los existentes. Este paso corre DESPUES de crm en
+# after_migrate (orden de `get_installed_apps`: frappe, crm, frappe_chatwoot), asi
+# que en un sitio nuevo los items ya existen cuando llegamos aqui.
+# Reportado por Alejandro el 2026-09-26.
+ITEMS_DROPDOWN_OCULTOS = ("app_selector", "about")
 
 # --- UX de la plataforma que NO viaja por fixture -------------------------
 # Los quick filters viven en `CRM Global Settings` (registro con `name` aleatorio,
@@ -127,8 +175,15 @@ VISTAS_CLIENTE = [
 ]
 
 
-def ajustar_sitio():
-    """Punto de entrada de `after_migrate`. Nunca lanza."""
+def ajustar_sitio(plan=None):
+    """Punto de entrada de `after_migrate`. Nunca lanza.
+
+    `plan` es opcional (D-5, 2026-09-27): el alta puede declarar el plan del
+    sitio explícitamente —`ajustar_sitio(plan="lite")`—; si no lo pasa y el
+    sitio no declara `sofia_plan`, `_plan_del_sitio` aplica el default
+    restrictivo `gratuito` y lo deja en el Error Log para que el operador lo
+    corrija. Nunca se hereda permiso por omisión.
+    """
     for paso in (
         sembrar_catalogos_una_vez,
         sembrar_print_formats_una_vez,
@@ -140,11 +195,17 @@ def ajustar_sitio():
         _app_por_defecto,
         _quick_filters_deal,
         _vistas_por_defecto,
+        _dropdown_items_plataforma,
         _usuario_servicio_agente,
         _vapid_push,
+        _plan_del_sitio,
     ):
         try:
-            paso()
+            # El unico paso parametrizable: recibe el plan explicito del alta.
+            if paso is _plan_del_sitio:
+                paso(plan)
+            else:
+                paso()
             frappe.db.commit()
         except Exception:
             frappe.db.rollback()
@@ -237,9 +298,18 @@ def sembrar_print_formats_una_vez():
 
 BANDERA_WEB_FORMS = "fc_web_forms_sembrados"
 
-# El sitio de la agencia. Es el UNICO donde los literales de marca del formulario
-# de cotizacion son los correctos; en cualquier otro sitio son marca ajena.
+# El sitio de la agencia. Es el UNICO donde los literales de marca (del formulario
+# de cotizacion y de la plataforma) son los correctos; en cualquier otro sitio son
+# marca ajena. Se conserva el nombre en singular porque ya se usaba; la
+# comparacion real va por `_es_sitio_agencia`, que contempla los DOS hostnames.
 SITIO_AGENCIA = "crm.lavendi.mx"
+
+# `sites/sofiav2.lavendi.mx` es un SYMLINK a `sites/crm.lavendi.mx`: el mismo
+# sitio responde a dos hostnames, y `frappe.local.site` trae el que resolvio la
+# peticion. Comparar solo contra "crm.lavendi.mx" haria que una peticion por el
+# dominio publico se tratara como sitio de cliente y se le borrara su propia
+# marca. Verificado en el bench el 2026-09-26.
+SITIOS_AGENCIA = frozenset({SITIO_AGENCIA, "sofiav2.lavendi.mx"})
 
 # El formulario de captacion. Es el unico de los Web Form que viajan con marca
 # adentro: `base-de-conocimiento` es una herramienta interna sin literales.
@@ -322,7 +392,7 @@ def _parametrizar_web_form(registro):
     """
     if registro.get("name") != WEB_FORM_COTIZACION:
         return registro
-    if frappe.local.site == SITIO_AGENCIA:
+    if _es_sitio_agencia():
         return registro
 
     for campo, clave in CLAVES_MARCA_WEB_FORM.items():
@@ -422,17 +492,98 @@ def deduplicar_web_form_fields():
             frappe.db.delete("Web Form Field", {"name": name})
 
 
+def _es_sitio_agencia(sitio=None):
+    """Si ESTE sitio es el de lavendi.mx (por cualquiera de sus dos hostnames)."""
+    return (sitio or frappe.local.site or "") in SITIOS_AGENCIA
+
+
+def _nombre_desde_host(sitio=None):
+    """Nombre de plataforma deducido del propio host: `medicare.lavendi.mx` ->
+    "Medicare".
+
+    Es lo unico que se puede poner sin inventar cuando el sitio no declaro
+    `brand_app_name`, y es honesto: nombra al cliente, no a la agencia. Un
+    acronimo sale con mayuscula inicial nada mas (`eeplv` -> "Eeplv"); si al
+    cliente le importa, declara la clave y manda ese valor.
+    """
+    etiqueta = (sitio or frappe.local.site or "").split(".")[0]
+    palabras = [p for p in re.split(r"[-_]+", etiqueta) if p]
+    return " ".join(p.capitalize() for p in palabras)
+
+
+def branding_de_sitio():
+    """Los 4 campos de marca de la plataforma, resueltos para ESTE sitio.
+
+    Cambio del 2026-09-26, misma causa que los Web Form y los catalogos: la marca
+    es de lavendi.mx, no producto, y viajaba como constante a todos los sitios.
+
+    Orden de resolucion:
+
+    1. **Sitio de la agencia** -> los literales de siempre (`BRANDING_AGENCIA`).
+       Es su marca; ahi no hay nada que corregir.
+    2. **Cualquier otro sitio** -> lo que declare en `site_config.json`:
+           "brand_app_name": "Medicare One",
+           "brand_logo": "/files/logo-cliente.png",
+           "brand_splash_image": "/files/logo-cliente.png",
+           "brand_favicon": "/files/favicon-cliente.png"
+    3. **Sin declarar** -> NEUTRO, nunca la marca de la agencia: el nombre se
+       deduce del propio host y el logo/splash/favicon se quedan vacios, con lo
+       que Frappe y el SPA del CRM pintan sus visuales nativos
+       (`crm/www/crm.py:get_brand()` devuelve los campos vacios y `BrandLogo.vue`
+       cae a su propio isotipo). Un sitio sin logo se ve generico; un sitio con el
+       logo de otra empresa se ve mal y la delata.
+
+    Cortesia: si el sitio declaro logo pero no splash, el splash usa su logo — se
+    deriva de lo que EL declaro, que es justo lo que hace la agencia (el mismo PNG
+    en los dos campos).
+    """
+    if _es_sitio_agencia():
+        return dict(BRANDING_AGENCIA)
+
+    marca = {}
+    for campo, clave in CLAVES_MARCA_SITIO.items():
+        valor = frappe.conf.get(clave)
+        marca[campo] = valor.strip() if isinstance(valor, str) else ""
+
+    if not marca["app_name"]:
+        marca["app_name"] = _nombre_desde_host()
+    if not marca["splash_image"]:
+        marca["splash_image"] = marca["app_logo"]
+    return marca
+
+
 def _branding_plataforma():
     """Marca de la plataforma en un sitio nuevo. Ver el docstring del modulo.
 
     Los PNG viajan dentro del app (`public/images/`) y se copian a `public/files/`
     del sitio, que es de donde el SPA del CRM los pide. No hace falta crear el
     registro `File`: Frappe sirve `/files/*` del disco (verificado 2026-09-16).
+
+    Lo que se escribe sale de `branding_de_sitio()`, no de una constante: en un
+    sitio de cliente estos campos NO pueden decir lavendi.mx. Lo que ya quedo
+    escrito en los sitios vivos no se corrige aqui —la guarda de abajo solo
+    escribe sobre el default de Frappe— sino con
+    `neutralizar_branding_ajeno.py`, que es dry-run por defecto: reescribir la
+    marca de un sitio en un `bench migrate`, sin que nadie lo mire, es
+    exactamente el reflejo que causo esta fuga.
     """
+    marca = branding_de_sitio()
+
+    # Los PNG de la agencia solo se plantan si la marca resuelta de ESTE sitio de
+    # verdad los referencia. Antes se copiaban siempre, asi que el dominio del
+    # cliente terminaba sirviendo `/files/sofia-logo.png` aunque nada lo usara.
+    # Los que ya estan en disco no se borran aqui (ver el script de limpieza).
+    referenciados = {
+        valor.rsplit("/", 1)[-1]
+        for valor in marca.values()
+        if isinstance(valor, str) and valor.startswith("/files/")
+    }
     origen = os.path.join(frappe.get_app_path("frappe_chatwoot"), "public", "images")
     destino = frappe.get_site_path("public", "files")
     os.makedirs(destino, exist_ok=True)
     for nombre in ARCHIVOS_MARCA:
+        if nombre not in referenciados:
+            continue
         src = os.path.join(origen, nombre)
         if not os.path.exists(src):
             continue
@@ -443,7 +594,7 @@ def _branding_plataforma():
     ws = frappe.get_single("Website Settings")
     # Solo si nadie lo personalizo: un cliente con marca propia no se pisa.
     if (ws.app_name or "").strip() in ("", "Frappe"):
-        for campo, valor in BRANDING.items():
+        for campo, valor in marca.items():
             ws.set(campo, valor)
         ws.save(ignore_permissions=True)
 
@@ -456,9 +607,9 @@ def _branding_plataforma():
     # mano desde el 18-sep, sixgardens (17-sep) nunca lo tuvo.
     fs = frappe.get_single("FCRM Settings")
     if not (fs.brand_name or "").strip():
-        fs.brand_name = BRANDING["app_name"]
-        fs.brand_logo = BRANDING["app_logo"]
-        fs.favicon = BRANDING["favicon"]
+        fs.brand_name = marca["app_name"]
+        fs.brand_logo = marca["app_logo"]
+        fs.favicon = marca["favicon"]
         fs.save(ignore_permissions=True)
 
 
@@ -496,6 +647,88 @@ def _app_por_defecto():
     if frappe.get_system_settings("default_app"):
         return
     frappe.db.set_single_value("System Settings", "default_app", "crm")
+
+
+# Clave del plan del sitio (categoria C1). La lee `utils/plan.py`; su default
+# cambio a fail-closed `gratuito` el 2026-09-27 (D-1), en paralelo a que este
+# paso empieza a escribirla (D-5/Fase 3).
+CLAVE_PLAN = "sofia_plan"
+PLAN_DEFAULT = "gratuito"
+
+
+def _escribir_site_config(clave, valor):
+    """Escribe una llave en `site_config.json` del sitio actual.
+
+    El archivo hasta ahora solo LEIA `frappe.conf`; para Escribir de verdad se
+    usa la API estandar de Frappe (`frappe.installer.update_site_config`), la
+    misma que usan los patches del bench — no se inventa una via nueva.
+    """
+    from frappe.installer import update_site_config
+
+    update_site_config(clave, valor)
+    # `update_site_config` reescribe el JSON pero NO refresca el `frappe.conf`
+    # ya cargado en este proceso: sin esto, el mismo `after_migrate` que acaba
+    # de declarar el plan seguiria leyendo el default hasta el siguiente request.
+    frappe.conf[clave] = valor
+
+
+def _plan_del_sitio(plan=None):
+    """Declara `sofia_plan` en `site_config.json` al alta (D-5, categoria C1).
+
+    Idempotente: si el sitio YA declara la llave, no la toca — un operador que
+    corrigio el plan a mano no se pisa en cada `bench migrate`.
+
+    `plan` es opcional. El alta puede pasarlo explicito
+    (`ajustar_sitio(plan="lite")`). Si no se pasa y el sitio no tiene la llave,
+    se aplica el default RESTRICTIVO `gratuito` (decision D-5/O2, Alejandro
+    2026-09-27) y se deja un `Error Log` audible para que el operador lo
+    corrija: el sitio nace bloqueado, nunca sobre-otorgado. Un valor explicito
+    que no este en `NIVELES` se rechaza igual de ruidosamente y NO se escribe
+    (el sitio se queda con el default fail-closed de `plan.py`).
+
+    No se escribe `lead_owner_default` ni `brand_*` aqui: exigen un dato humano
+    (el dueno de negocio / la marca del cliente) y un default inventado crearia
+    una identidad falsa. Se declaran a mano en el alta (ver §5 del registro de
+    capacidades y `RUNBOOK-ALTA-CLIENTE.md`).
+    """
+    from frappe_chatwoot.utils.plan import NIVELES
+
+    if frappe.conf.get(CLAVE_PLAN):
+        return
+
+    if plan:
+        if plan not in NIVELES:
+            frappe.log_error(
+                f"Sitio {frappe.local.site}: sofia_plan explicito invalido ({plan!r}); "
+                f"validos: {', '.join(NIVELES)}. No se escribio; el sitio queda en el "
+                f"default fail-closed '{PLAN_DEFAULT}'.",
+                "provisionamiento: plan invalido",
+            )
+            return
+        declarado = plan
+    else:
+        declarado = PLAN_DEFAULT
+        frappe.log_error(
+            f"Sitio {frappe.local.site} sin sofia_plan: se aplico el default "
+            f"restrictivo '{PLAN_DEFAULT}'. Declara el plan real del cliente "
+            f"(site_config.sofia_plan) para que el gate no lo deje bloqueado.",
+            "provisionamiento: plan por default",
+        )
+
+    _escribir_site_config(CLAVE_PLAN, declarado)
+
+
+def _dropdown_items_plataforma():
+    """Oculta del menu de usuario los items que no son de producto. Ver
+    `ITEMS_DROPDOWN_OCULTOS`. Idempotente: si ya estan ocultos no guarda."""
+    crm_settings = frappe.get_single("FCRM Settings")
+    ocultados = 0
+    for item in crm_settings.dropdown_items:
+        if item.name1 in ITEMS_DROPDOWN_OCULTOS and not item.hidden:
+            item.hidden = 1
+            ocultados += 1
+    if ocultados:
+        crm_settings.save(ignore_permissions=True)
 
 
 def _quick_filters_deal():
