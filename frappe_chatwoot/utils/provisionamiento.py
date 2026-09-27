@@ -17,10 +17,12 @@ Eso deja dos huecos que este modulo cierra en `after_migrate`:
 3. **Marca de la plataforma**: un sitio nuevo nace diciendo "Frappe" y sin logo.
    Aqui se llena `Website Settings` y `FCRM Settings` — solo si el sitio sigue en
    el default, para no pisar marca propia. Desde el 2026-09-26 el valor NO es una
-   constante: lo resuelve `branding_de_sitio()` contra `site_config.json`
-   (`brand_app_name`, `brand_logo`, `brand_splash_image`, `brand_favicon`) y sin
-   esas claves queda neutro —nombre deducido del host, visuales nativos de
-   Frappe—, nunca "Sofía GPT by lavendi.mx" ni los PNG de la agencia. Antes se
+   constante cableada: lo resuelve `branding_de_sitio()` contra `site_config.json`
+   (`brand_app_name`, `brand_logo`, `brand_splash_image`, `brand_favicon`). La
+   decision del paso 15 (2026-09-26, Alejandro) es que los sitios de cliente
+   CONSERVAN la marca de plataforma "Sofía GPT by lavendi.mx": sin claves
+   declaradas, un sitio NO-agencia nace con los literales de la plataforma, y solo
+   un sitio que declare su propia marca la reemplaza campo por campo. Antes se
    escribia la marca de lavendi.mx en CADA sitio y en CADA migrate: los 6 sitios
    de cliente la tenian puesta (medido en su `tabSingles`).
 
@@ -89,9 +91,10 @@ VAPID_SUBJECT_DEFAULT = "mailto:contacto@lavendi.mx"
 # de la agencia. Es la fuga de marca mas visible que teniamos: el cliente entra a
 # SU CRM y lee el nombre de otra empresa en la pestana, el login y el menu.
 #
-# Ahora se resuelve por sitio (`branding_de_sitio`): estos literales sobreviven
-# solo en el sitio de la agencia, y cualquier otro los declara en su
-# `site_config.json` o se queda NEUTRO.
+# Ahora se resuelve por sitio (`branding_de_sitio`): estos literales son el
+# DEFAULT de cualquier sitio —incluido uno de cliente— y el sitio los override
+# campo por campo declarando su clave en `site_config.json`. Decision del paso 15
+# (2026-09-26): los sitios de cliente CONSERVAN la marca de plataforma.
 BRANDING_AGENCIA = {
     "app_name": "Sofía GPT by lavendi.mx",
     "app_logo": "/files/sofia-logo.png",
@@ -514,41 +517,47 @@ def _nombre_desde_host(sitio=None):
 def branding_de_sitio():
     """Los 4 campos de marca de la plataforma, resueltos para ESTE sitio.
 
-    Cambio del 2026-09-26, misma causa que los Web Form y los catalogos: la marca
-    es de lavendi.mx, no producto, y viajaba como constante a todos los sitios.
+    Decision del paso 15 (2026-09-26, Alejandro): los sitios de cliente CONSERVAN
+    la marca de plataforma "Sofía GPT by lavendi.mx". Se abandono la
+    neutralizacion: un sitio nuevo NO-agencia que no declare marca propia nace con
+    los literales de `BRANDING_AGENCIA`, no con un nombre deducido del host ni con
+    visuales vacios. Se conserva el override por sitio.
 
     Orden de resolucion:
 
     1. **Sitio de la agencia** -> los literales de siempre (`BRANDING_AGENCIA`).
        Es su marca; ahi no hay nada que corregir.
-    2. **Cualquier otro sitio** -> lo que declare en `site_config.json`:
+    2. **Cualquier otro sitio** -> arranca de `BRANDING_AGENCIA` y reemplaza,
+       campo por campo, lo que el sitio declare en `site_config.json`:
            "brand_app_name": "Medicare One",
            "brand_logo": "/files/logo-cliente.png",
            "brand_splash_image": "/files/logo-cliente.png",
            "brand_favicon": "/files/favicon-cliente.png"
-    3. **Sin declarar** -> NEUTRO, nunca la marca de la agencia: el nombre se
-       deduce del propio host y el logo/splash/favicon se quedan vacios, con lo
-       que Frappe y el SPA del CRM pintan sus visuales nativos
-       (`crm/www/crm.py:get_brand()` devuelve los campos vacios y `BrandLogo.vue`
-       cae a su propio isotipo). Un sitio sin logo se ve generico; un sitio con el
-       logo de otra empresa se ve mal y la delata.
+       Un campo declarado vacio (o no declarado) cae al default de plataforma.
+    3. **Sin declarar nada** -> marca de plataforma. Es intencional: "Sofía GPT by
+       lavendi.mx" es el producto que el cliente contrata, y hasta que exista marca
+       blanca real (dominio propio del cliente) no se neutraliza.
 
-    Cortesia: si el sitio declaro logo pero no splash, el splash usa su logo — se
-    deriva de lo que EL declaro, que es justo lo que hace la agencia (el mismo PNG
-    en los dos campos).
+    Cortesia: si el sitio declaro logo propio pero no splash, el splash usa SU
+    logo — se deriva de lo que EL declaro, no del PNG de la plataforma, que es
+    justo lo que hace la agencia (el mismo PNG en los dos campos).
     """
     if _es_sitio_agencia():
         return dict(BRANDING_AGENCIA)
 
-    marca = {}
+    marca = dict(BRANDING_AGENCIA)
+    declarado = {}
     for campo, clave in CLAVES_MARCA_SITIO.items():
         valor = frappe.conf.get(clave)
-        marca[campo] = valor.strip() if isinstance(valor, str) else ""
+        declarado[campo] = valor.strip() if isinstance(valor, str) and valor.strip() else ""
+        if declarado[campo]:
+            marca[campo] = declarado[campo]
 
-    if not marca["app_name"]:
-        marca["app_name"] = _nombre_desde_host()
-    if not marca["splash_image"]:
-        marca["splash_image"] = marca["app_logo"]
+    # Cortesia: declaro logo propio pero no splash -> su splash es su logo. Solo
+    # cuando el logo tambien es suyo; si el logo es el de plataforma, el splash se
+    # queda en el de plataforma (no en un logo derivado).
+    if declarado["app_logo"] and not declarado["splash_image"]:
+        marca["splash_image"] = declarado["app_logo"]
     return marca
 
 
@@ -559,20 +568,18 @@ def _branding_plataforma():
     del sitio, que es de donde el SPA del CRM los pide. No hace falta crear el
     registro `File`: Frappe sirve `/files/*` del disco (verificado 2026-09-16).
 
-    Lo que se escribe sale de `branding_de_sitio()`, no de una constante: en un
-    sitio de cliente estos campos NO pueden decir lavendi.mx. Lo que ya quedo
-    escrito en los sitios vivos no se corrige aqui —la guarda de abajo solo
-    escribe sobre el default de Frappe— sino con
-    `neutralizar_branding_ajeno.py`, que es dry-run por defecto: reescribir la
-    marca de un sitio en un `bench migrate`, sin que nadie lo mire, es
-    exactamente el reflejo que causo esta fuga.
+    Lo que se escribe sale de `branding_de_sitio()` (default: marca de plataforma;
+    override por sitio), no de una constante cableada. La guarda de abajo solo
+    escribe cuando `Website Settings` sigue en el default de Frappe, asi que un
+    sitio con marca propia ya puesta no se pisa. Lo que ya quedo escrito en los
+    sitios vivos no se corrige aqui: se reescribe solo si un humano lo autoriza.
     """
     marca = branding_de_sitio()
 
-    # Los PNG de la agencia solo se plantan si la marca resuelta de ESTE sitio de
-    # verdad los referencia. Antes se copiaban siempre, asi que el dominio del
-    # cliente terminaba sirviendo `/files/sofia-logo.png` aunque nada lo usara.
-    # Los que ya estan en disco no se borran aqui (ver el script de limpieza).
+    # Los PNG de la agencia se plantan si la marca resuelta de ESTE sitio los
+    # referencia. Con el default de plataforma (paso 15) un sitio de cliente sin
+    # marca propia SI los referencia, asi que se copian; un sitio con marca propia
+    # que no los use no los recibe. Los que ya estan en disco no se borran aqui.
     referenciados = {
         valor.rsplit("/", 1)[-1]
         for valor in marca.values()
