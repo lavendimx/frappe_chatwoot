@@ -17,7 +17,10 @@ CRITERIOS DE EXCLUSIÓN (en este orden, el primero que aplica manda):
   2. El contacto es CLIENTE ACTIVO: su `Contact.ghl_contact_id` resuelve a un
      `Customer` de ERPNext (mismo vínculo que `facturacion.cartera_de_contacto`
      — ver `vincular_customer_contacto.py`). Un cliente hablando de facturación
-     o soporte no es un prospecto que reactivar.
+     o soporte no es un prospecto que reactivar. ⚠ Este filtro es **inerte en
+     los sitios de cliente** (ninguno tiene erpnext → sin `Customer`): por eso
+     el barrido se protege con la **allowlist fail-closed** de `barrer()`, no
+     con este criterio (ver "Fase 2" en `_es_cliente`).
   3. Ya tiene una `Secuencia Inscripcion` en estado Activa — evita el doble
      mensaje con el motor de secuencias existente (p. ej. "4. Seguimientos —
      PVP").
@@ -25,6 +28,11 @@ CRITERIOS DE EXCLUSIÓN (en este orden, el primero que aplica manda):
 
 Sin deal ligado a la conversación (`chatwoot_conversation_id`), NO se excluye
 por defecto — son leads nuevos aún sin oportunidad, que sí son candidatos.
+
+GATE FAIL-CLOSED (2026-09-27): `barrer()` solo corre en los inbox declarados en
+`site_config.json` (`autofollow_inboxes`). Si la clave falta o está vacía, no
+barre ningún inbox. Hoy ningún sitio la declara → el barrido está apagado por
+diseño; **encender autofollow es una acción explícita y aparte**.
 """
 
 import json
@@ -43,7 +51,22 @@ def _es_cliente(contact_name: str | None) -> bool:
     """Mismo vínculo que `facturacion.cartera_de_contacto`: Contact.ghl_contact_id
     -> Customer.ghl_contact_id. Sin vínculo, NO se asume cliente (falso negativo
     es más seguro aquí: perdemos un follow-up, no arriesgamos molestar a un
-    cliente que paga)."""
+    cliente que paga).
+
+    Guard `erpnext` (2026-09-27): sin el doctype `Customer` — ningún sitio de
+    cliente tiene erpnext hoy — el vínculo no puede existir. Se retorna `False`
+    explícito sin consultas muertas, mismo patrón que
+    `cliente_erp._asegurar_customer`. Consecuencia: el filtro queda **inerte por
+    diseño** en esos sitios; quien de verdad protege el barrido es la allowlist
+    fail-closed de `barrer()` (`autofollow_inboxes`), no este criterio.
+
+    FASE 2 (documentada, NO implementada): el filtro semántico real —"cliente
+    que paga *dentro* de un inbox permitido"— se resuelve marcando el `Contact`
+    (p. ej. `tipo_relacion` / `is_billing_contact`) y exige que el cliente pueble
+    el dato. Hasta entonces no se implementa aquí.
+    """
+    if "erpnext" not in frappe.get_installed_apps():
+        return False
     if not contact_name:
         return False
     ghl_id = frappe.db.get_value("Contact", contact_name, "ghl_contact_id")
@@ -156,6 +179,63 @@ def clasificar(inbox_id, dias_max: int = 30) -> dict:
 # `1-5` en el crontab en vez de volverlo un campo.
 DIAS_HABILES = (1, 2, 3, 4, 5)
 DELAY_ENTRE_ENVIOS_SEG = (60, 120)
+
+# Allowlist fail-closed de inboxes elegibles (site_config `autofollow_inboxes`).
+#
+# Nombre elegido: `autofollow_inboxes` — sigue la convención de claves planas por
+# sitio ya usadas (`sofia_plan`, `sofia_lite_max_usuarios`, `lead_owner_default`,
+# `brand_app_name`) y nombra explícitamente la capacidad a la que pertenece.
+#
+# Semántica (fail-closed): si la clave FALTA o queda VACÍA, `barrer()` no corre
+# en ningún inbox. Hoy equivale a "nadie declaró → no se escribe a nadie", aunque
+# un `Agente IA` tuviera `followup_activo=1` por error. Si existe, es la lista de
+# `inbox_id` (ints) elegibles; cualquier otro inbox queda fuera, **incluso con
+# `forzar_inbox`** (el bypass manual NO se salta la allowlist).
+#
+# Valor sugerido por sitio (solo propuesta, NO se escribe aquí): el inbox real
+# del agente del cliente — p. ej. `"autofollow_inboxes": [7]` en sixgardens
+# (inbox 7) y `[18]` en grupogardenias (inbox 18). Un sitio NO se enciende solo
+# por declarar la clave: encender autofollow (`followup_activo=1`) es una acción
+# explícita y aparte.
+CLAVE_INBOXES = "autofollow_inboxes"
+
+
+def _parse_inboxes(crudo) -> set[int]:
+    """Normaliza el valor crudo de `autofollow_inboxes` a un set de ints.
+
+    Acepta lista/tupla de ints (`[5, 7]`) o string con ints separados por coma o
+    espacio (`"5, 7"`). Lo que no parsea a int se ignora en vez de reventar — un
+    valor mal escrito deja la allowlist más chica (fail-closed), nunca más
+    grande."""
+    if not crudo:
+        return set()
+    if isinstance(crudo, str):
+        partes = crudo.replace(",", " ").split()
+    elif isinstance(crudo, (list, tuple, set)):
+        partes = list(crudo)
+    else:
+        partes = [crudo]
+    permitidos = set()
+    for p in partes:
+        try:
+            permitidos.add(int(p))
+        except (TypeError, ValueError):
+            continue
+    return permitidos
+
+
+def _inboxes_permitidos() -> set[int]:
+    """Allowlist efectiva del sitio (lee `site_config.json` vía `frappe.conf`)."""
+    return _parse_inboxes(frappe.conf.get(CLAVE_INBOXES))
+
+
+def _permitido(inbox_id, permitidos: set) -> bool:
+    """¿El inbox está en la allowlist ya normalizada? Un valor no numérico cae
+    a `False` (no se barre por accidente)."""
+    try:
+        return int(inbox_id) in permitidos
+    except (TypeError, ValueError):
+        return False
 
 
 def _config_agente() -> dict:
@@ -363,16 +443,31 @@ def barrer(forzar_inbox=None, dry_run: int = 0) -> dict:
     """Job del cron. Para cada `Agente IA` con `followup_activo=1`: sincroniza
     elegibles nuevos y envía los pasos vencidos (tope + delay anti-ban).
 
+    Allowlist fail-closed (2026-09-27): solo corre en los inbox declarados en
+    `site_config.autofollow_inboxes`. Sin la clave (o vacía) NO barre ningún
+    inbox; un inbox fuera de la lista se omite aunque su `Agente IA` esté
+    activo.
+
     `forzar_inbox` + `dry_run=1`: SOLO para validación manual (paso 8 del
     plan) — procesa ese inbox aunque `followup_activo` esté en 0, y escribe
     el texto como nota privada en vez de mandarlo. Nunca se llama así desde
-    el cron."""
+    el cron. **No se salta la allowlist**: un `forzar_inbox` fuera de la
+    lista no corre (si no, el bypass manual sería la puerta trasera del gate)."""
     dry_run = bool(int(dry_run))
+    permitidos = _inboxes_permitidos()
+    if not permitidos:
+        return {"omitido": "sin inboxes declarados en site_config.autofollow_inboxes (fail-closed)"}
+    if forzar_inbox is not None and not _permitido(forzar_inbox, permitidos):
+        return {"omitido": f"inbox {forzar_inbox} fuera de autofollow_inboxes"}
+
     resultado = {}
     agentes = frappe.get_all("Agente IA", filters={"active": 1}, pluck="name")
     if forzar_inbox is not None and str(forzar_inbox) not in agentes:
         agentes = [str(forzar_inbox)]
     for inbox_id in agentes:
+        if not _permitido(inbox_id, permitidos):
+            resultado[inbox_id] = {"omitido": "fuera de autofollow_inboxes"}
+            continue
         agente = frappe.get_doc("Agente IA", inbox_id).as_dict()
         forzado = forzar_inbox is not None and str(forzar_inbox) == str(inbox_id)
         if not agente.get("followup_activo") and not forzado:
