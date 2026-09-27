@@ -343,3 +343,44 @@ class TestAvanzarFrenoDeRafaga(FrappeTestCase):
         self.assertEqual(secuencias.MAX_CORRIDA_DEFAULT, 20)
         self.assertEqual(secuencias.DELAY_ENTRE_ENVIOS_SEG, (60, 120))
         self.assertEqual(secuencias.ESTADOS_QUE_SACAN, ("won", "lost", "abandoned"))
+
+
+class TestPlanGateJob(FrappeTestCase):
+    """`avanzar` respeta el plan del SITIO, no el del usuario.
+
+    El scheduler corre como Administrator (y `plan.exigir_plan_minimo` exime a
+    la agencia), así que sin este gate un sitio Lite con una `Secuencia` activa
+    mandaba correo/WhatsApp igual. Con plan < `pro` el job es no-op silencioso
+    —un dict con `motivo`, nunca una excepción que spamee el Error Log."""
+
+    def _correr(self, plan_sitio, usuario="Administrator"):
+        with patch.object(secuencias.plan, "plan_de_este_sitio",
+                          return_value=plan_sitio), \
+                patch.object(secuencias.frappe.session, "user", usuario):
+            return _avanzar_mock([], _sec(pasos=[{"tipo": "Email"}]))
+
+    def test_lite_es_no_op_y_no_toca_la_base(self):
+        result, m = self._correr("lite")
+        self.assertEqual(result, {"activo": False, "motivo": "plan"})
+        m["get_all"].assert_not_called()
+        self.assertEqual(m["ejecutados"], [])
+
+    def test_gratuito_es_no_op(self):
+        result, _ = self._correr("gratuito")
+        self.assertEqual(result.get("motivo"), "plan")
+
+    def test_no_se_exime_por_usuario_de_agencia(self):
+        # Aunque el job corra como Administrator, el gate es del sitio: un
+        # `sofia_plan=lite` no se cuela por eso.
+        result, m = self._correr("lite", usuario="Administrator")
+        self.assertEqual(result, {"activo": False, "motivo": "plan"})
+        m["get_all"].assert_not_called()
+
+    def test_pro_procede(self):
+        _, m = self._correr("pro")
+        m["get_all"].assert_called_once()
+
+    def test_enterprise_procede(self):
+        _, m = self._correr("enterprise")
+        m["get_all"].assert_called_once()
+

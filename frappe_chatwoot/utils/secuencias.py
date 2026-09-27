@@ -197,6 +197,22 @@ def _activo() -> bool:
     )
 
 
+def _plan_permite_envios() -> bool:
+    """¿El plan del SITIO alcanza para que este job mande mensajes?
+
+    El gate de `plan.exigir_plan_minimo` NO sirve en el scheduler: corre como
+    Administrator y esa función exime a la agencia (`_es_agencia`), así que en
+    un sitio Lite el job se colaría igual. Por eso el chequeo es **a nivel
+    sitio** (`plan.plan_de_este_sitio()`), sin mirar usuario. `lite`/`gratuito`
+    no incluyen Secuencias; `pro`/`enterprise` sí (y un sitio sin la llave
+    resuelve a `enterprise`, el default fail-open documentado en `plan.py`).
+    """
+    return (
+        plan.NIVELES.index(plan.plan_de_este_sitio())
+        >= plan.NIVELES.index("pro")
+    )
+
+
 def _ahora():
     return frappe.utils.now_datetime()
 
@@ -1116,7 +1132,17 @@ def _debe_salir(ins: dict) -> str | None:
 
 
 def avanzar():
-    """Scheduler. Ejecuta los pasos vencidos, respetando ventana y freno."""
+    """Scheduler. Ejecuta los pasos vencidos, respetando ventana y freno.
+
+    Primero el plan del sitio (`_plan_permite_envios`): un sitio Lite/Gratuito
+    no tiene Secuencias, pero el job corría igual como Administrator y mandaba
+    correo/WhatsApp — el gate de la UI no lo cubría. Es un **no-op silencioso**
+    (dict con `motivo`), nunca una excepción: el job corre cada pocos minutos y
+    llenaría el Error Log en cada corrida.
+    """
+    if not _plan_permite_envios():
+        return {"activo": False, "motivo": "plan"}
+
     if not _activo():
         return {"activo": False}
 

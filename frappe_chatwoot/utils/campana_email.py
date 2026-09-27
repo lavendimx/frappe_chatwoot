@@ -20,12 +20,39 @@ DOS INTERRUPTORES, A PROPÓSITO (mismo patrón que `secuencias_activas`)
     `Campana Email.activa` es por campaña. Ambos deben estar encendidos para
     que una campaña mande algo sola. Registrar el job en el scheduler NO
     enciende nada por sí solo.
+
+GATE POR PLAN (sitio < Pro ⇒ no-op)
+    El scheduler corre como Administrator, así que `plan.exigir_plan_minimo`
+    (que exime a la agencia) no aplica: el gate es **a nivel sitio**. En un
+    sitio Lite/Gratuito `avanzar` devuelve `{"activo": False, "motivo": "plan"}`
+    sin tocar la base — un dict, no una excepción, para no spamear el Error Log.
 """
 
 import frappe
 
+from frappe_chatwoot.utils import plan
+
+
+def _plan_permite_envios() -> bool:
+    """¿El plan del SITIO alcanza para que este job mande correo?
+
+    Mismo criterio que `secuencias._plan_permite_envios`: el scheduler corre
+    como Administrator y `plan.exigir_plan_minimo` exime a la agencia, así que
+    el chequeo es **a nivel sitio**, no por usuario. Un sitio Lite/Gratuito no
+    incluye Campañas de email; `pro`/`enterprise` sí.
+    """
+    return (
+        plan.NIVELES.index(plan.plan_de_este_sitio())
+        >= plan.NIVELES.index("pro")
+    )
+
 
 def avanzar():
+    """Scheduler. No-op silencioso (dict con `motivo`) en plan < pro — nunca una
+    excepción, que el job corre seguido y llenaría el Error Log."""
+    if not _plan_permite_envios():
+        return {"activo": False, "motivo": "plan"}
+
     if not frappe.db.get_single_value("Chatwoot Settings", "campanas_automaticas"):
         return
 
