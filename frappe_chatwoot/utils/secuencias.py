@@ -696,8 +696,31 @@ def _correo_disponible() -> bool:
                 and s.get_password("agenda_token", raise_exception=False))
 
 
+def _marca_del_sitio() -> str:
+    """Display name del remitente para ESTE sitio, o "" para no tocar la cabecera.
+
+    El correo de secuencias sale del buzón compartido `contacto@lavendi.mx` (el host
+    lo impersona por delegación de dominio), así que hasta hoy la cabecera `From` la
+    resolvía el host por el DOMINIO del remitente: siempre `lavendi.mx`. Un sitio
+    cliente (Six Gardens, Estrublock…) mandaba sus seguimientos firmados por la
+    agencia — la misma clase de fuga que `provisionamiento.branding_de_sitio()` cerró
+    del lado del CRM.
+
+    La marca se lee de `site_config.json` (`brand_app_name`, la clave que declara cada
+    sitio en `CLAVES_MARCA_SITIO`), NO de `FCRM Settings.brand_name`: ese campo guarda
+    la marca de PLATAFORMA ("Sofía GPT by lavendi.mx") en los sitios de cliente, que es
+    justo lo que no debe encabezar su correo.
+
+    Sin declarar -> "" -> el host deriva la marca del dominio del remitente
+    (`lavendi.mx`): EXACTAMENTE el comportamiento de hoy. El sitio de la agencia no
+    declara `brand_app_name`, así que su cabecera tampoco cambia."""
+    valor = frappe.conf.get("brand_app_name")
+    return valor.strip() if isinstance(valor, str) else ""
+
+
 def _enviar_correo(para: str, asunto: str, html: str, remitente: str = "contacto@lavendi.mx",
-                   cc: str | None = None, adjuntos: list | None = None) -> None:
+                   cc: str | None = None, adjuntos: list | None = None,
+                   marca: str = "") -> None:
     """Manda el correo por el host (Gmail API con la service account). Lanza si falla.
 
     `cc` existe porque la regla de lavendi.mx pide copia al equipo en todo saliente
@@ -706,7 +729,12 @@ def _enviar_correo(para: str, asunto: str, html: str, remitente: str = "contacto
     `adjuntos` es una lista de `{"nombre", "mime", "datosB64"}` (18-sep). Sin ella el
     host arma el MIME de una sola parte de siempre — el camino sin adjunto no cambia.
     El timeout sube a 120 s cuando hay adjunto: 250 KB de base64 por la red Docker más
-    la subida a Gmail no caben en los 30 s del caso normal."""
+    la subida a Gmail no caben en los 30 s del caso normal.
+
+    `marca` (2026-09-27) es el display name del remitente que el host pone en el `From:`
+    (ver `lib/correo.js::cabeceraFrom`). Vacío -> la clave NO se manda y el host deriva
+    la marca del dominio (`lavendi.mx`), byte por byte el comportamiento anterior. La
+    resuelve `_marca_del_sitio()` en el llamador."""
     import requests
 
     s = frappe.get_single("Chatwoot Settings")
@@ -716,7 +744,8 @@ def _enviar_correo(para: str, asunto: str, html: str, remitente: str = "contacto
         f"{base}/correo/enviar",
         json={"para": para, "asunto": asunto, "html": html, "remitente": remitente,
               **({"cc": cc} if cc else {}),
-              **({"adjuntos": adjuntos} if adjuntos else {})},
+              **({"adjuntos": adjuntos} if adjuntos else {}),
+              **({"marca": marca.strip()} if marca and marca.strip() else {})},
         headers={"x-sofia-token": token, "Content-Type": "application/json"},
         timeout=120 if adjuntos else 30,
     )
@@ -742,7 +771,8 @@ def _dado_de_baja(destino: str, secuencia: str) -> bool:
 
 def _enviar_correo_frappe(para: str, asunto: str, html: str, secuencia: str,
                           remitente: str = "contacto@lavendi.mx",
-                          adjuntos: list | None = None) -> None:
+                          adjuntos: list | None = None,
+                          marca: str = "") -> None:
     """Riel unificado: `frappe.sendmail` (mismo motor que Campañas), con
     tracking de apertura (`track_email_status` del `Email Account`, activo
     desde el 2026-09-16) y link de baja ligado a la secuencia. Lanza si falla
@@ -756,14 +786,19 @@ def _enviar_correo_frappe(para: str, asunto: str, html: str, secuencia: str,
     `adjuntos` usa el mismo formato que el riel del host (`nombre`/`datosB64`) y se
     traduce al que espera `frappe.sendmail` (`fname`/`fcontent`). Sin esto, prender
     el flag algún día habría mandado el correo del checklist **sin el PDF y sin
-    avisar** — el modo de falla silenciosa que ya costó Aerotec y Agri Star."""
+    avisar** — el modo de falla silenciosa que ya costó Aerotec y Agri Star.
+
+    `marca` (2026-09-27, mismo cierre que en `_enviar_correo`) es el display name del
+    remitente: con él, el `From` sale `"Marca <buzon@dominio>"` (formato que Frappe ya
+    usa en `get_formatted_email`); vacío, el `sender` queda tal cual, exactamente el
+    comportamiento anterior. Lo resuelve `_marca_del_sitio()` en el llamador."""
     import base64
 
     anexos = [{"fname": a["nombre"], "fcontent": base64.b64decode(a["datosB64"])}
               for a in (adjuntos or [])]
     frappe.sendmail(
         recipients=[para],
-        sender=remitente,
+        sender=f"{marca.strip()} <{remitente}>" if marca and marca.strip() else remitente,
         subject=asunto,
         message=html,
         reference_doctype="Secuencia",
@@ -966,7 +1001,7 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
                 return "email omitido (dado de baja de esta secuencia)"
             try:
                 _enviar_correo_frappe(destino, asunto, html, ins["secuencia"],
-                                      adjuntos=adjuntos)
+                                      adjuntos=adjuntos, marca=_marca_del_sitio())
                 return f"email enviado a {destino} (frappe.sendmail){nota_adjunto}"
             except Exception as exc:
                 frappe.log_error(
@@ -980,7 +1015,8 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
             # falla silenciosa que ya costó Aerotec y Agri Star.
             return "email omitido (sin canal de correo saliente configurado)"
         try:
-            _enviar_correo(destino, asunto, html, cc=CC_EQUIPO, adjuntos=adjuntos)
+            _enviar_correo(destino, asunto, html, cc=CC_EQUIPO, adjuntos=adjuntos,
+                           marca=_marca_del_sitio())
         except Exception as exc:
             frappe.log_error(f"secuencia {ins['name']}: email a {destino}: {exc}", "Secuencias")
             return f"email omitido (error al enviar: {exc})"

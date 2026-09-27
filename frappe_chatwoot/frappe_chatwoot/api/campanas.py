@@ -32,6 +32,7 @@ NOTA sobre `send_test_email` del core
 
 import frappe
 from frappe_chatwoot.utils import plan
+from frappe_chatwoot.utils.secuencias import _marca_del_sitio
 from frappe import _
 
 _ROLES_EDICION = ("System Manager", "Sales Manager")
@@ -186,7 +187,7 @@ def crear(
     contenido,
     content_type="HTML",
     sender_email=None,
-    sender_name="lavendi.mx",
+    sender_name=None,
     send_unsubscribe_link=1,
     serie=None,
     serie_paso=None,
@@ -222,7 +223,7 @@ def crear(
     doc = frappe.new_doc("Newsletter")
     doc.subject = subject
     doc.sender_email = (sender_email or "").strip() or _remitente_default()
-    doc.sender_name = (sender_name or "lavendi.mx").strip()
+    doc.sender_name = (sender_name or _marca_del_sitio() or "lavendi.mx").strip()
     doc.content_type = content_type
     if content_type == "HTML":
         doc.message_html = contenido
