@@ -5,8 +5,9 @@
 Cubre lo que se puede ejercitar sin mandar WhatsApp ni correo:
 
   - `_dentro_de_ventana` / `_siguiente_hueco` — ventana L-V 12:00-18:00.
-  - `_debe_salir` — salidas por cambio de etapa (doble vocabulario
-    `ghl_status`/`status`), por respuesta, el puente multi-contacto y el
+    - `_debe_salir` — salidas por cambio de etapa (doble vocabulario
+    `ghl_status`/`status`), la espera por respuesta (`__esperar_humano__`,
+    desde el 24-sep responder ya NO saca), el puente multi-contacto y el
     posponer cuando Chatwoot no responde.
   - `avanzar` — selección/orden del lote vencido y el freno de ráfaga "del
     canal, no del motor" (commit ca397b9): el tope y el delay solo aplican a
@@ -165,7 +166,7 @@ class TestSiguienteHueco(FrappeTestCase):
 
 
 class TestDebeSalir(FrappeTestCase):
-    """`_debe_salir` — ramas de salida/posponer sin tocar Chatwoot real."""
+    """`_debe_salir` — ramas de salida/espera/posponer sin tocar Chatwoot real."""
 
     def _patch_db(self, deal_estado=None, parar=0, hermana=None):
         def fake(doctype, *args, **kwargs):
@@ -196,15 +197,15 @@ class TestDebeSalir(FrappeTestCase):
         with self._patch_db(deal_estado={"ghl_status": "open", "status": "Open"}, parar=0):
             self.assertIsNone(secuencias._debe_salir(ins))
 
-    def test_sale_si_otro_contacto_de_la_oportunidad_respondio(self):
+    def test_espera_si_otro_contacto_de_la_oportunidad_respondio(self):
+        # Puente multi-contacto (18-sep): desde el 24-sep la respuesta de la
+        # hermana NO saca — devuelve `__esperar_humano__`, como la propia.
         ins = _ins("INS-1")
         with self._patch_db(deal_estado={"ghl_status": "open", "status": "Open"},
                             parar=1, hermana=frappe._dict({"name": "INS-2", "contacto": "CONT-2"})):
-            motivo = secuencias._debe_salir(ins)
-        self.assertIn("otro contacto de la oportunidad respondió", motivo)
-        self.assertIn("CONT-2", motivo)
+            self.assertEqual(secuencias._debe_salir(ins), "__esperar_humano__")
 
-    def test_sale_si_el_contacto_respondio_despues_del_ultimo_envio(self):
+    def test_espera_si_el_contacto_respondio_despues_del_ultimo_envio(self):
         ins = _ins("INS-1", conversation_id="77",
                    ultimo_envio_at=dt.datetime(2026, 9, 23, 13, 0))
         epoca = dt.datetime(2026, 9, 23, 14, 0).timestamp()
@@ -213,7 +214,7 @@ class TestDebeSalir(FrappeTestCase):
                              return_value={"payload": [{"message_type": 0, "created_at": epoca}]}), \
                 patch.object(secuencias.frappe.db, "set_value") as set_value, \
                 patch.object(secuencias, "_avisar_respondio") as avisar:
-            self.assertEqual(secuencias._debe_salir(ins), "el contacto respondió")
+            self.assertEqual(secuencias._debe_salir(ins), "__esperar_humano__")
         # Deja constancia de cuándo respondió y avisa al equipo.
         self.assertTrue(set_value.called)
         avisar.assert_called_once()
@@ -316,11 +317,17 @@ class TestAvanzarFrenoDeRafaga(FrappeTestCase):
         self.assertEqual(campos["estado"], "Salió por cambio de etapa")
         self.assertEqual(campos["motivo"], motivo)
 
-    def test_salida_por_respuesta_marca_estado_correcto(self):
+    def test_respuesta_pospone_en_vez_de_sacar(self):
+        # 2026-09-24: responder significa interés, no baja. `avanzar` pospone
+        # (nuevo `proximo_en`) y NO marca "Salió por respuesta".
         result, m = _avanzar_mock([_ins("INS-1")], _sec(),
-                                  debe_salir="el contacto respondió")
-        self.assertEqual(result["salidas"], 1)
-        self.assertEqual(m["seteados"][0][1]["estado"], "Salió por respuesta")
+                                  debe_salir="__esperar_humano__")
+        self.assertEqual(result["pospuestos"], 1)
+        self.assertEqual(result["salidas"], 0)
+        self.assertEqual(result["ejecutados"], 0)
+        self.assertTrue(m["db_set"].called)
+        self.assertNotIn("Salió por respuesta",
+                         [campos.get("estado") for _, campos in m["seteados"]])
 
     def test_posponer_reagenda_30_min(self):
         result, _ = _avanzar_mock([_ins("INS-1")], _sec(), debe_salir="__posponer__")
@@ -343,3 +350,44 @@ class TestAvanzarFrenoDeRafaga(FrappeTestCase):
         self.assertEqual(secuencias.MAX_CORRIDA_DEFAULT, 20)
         self.assertEqual(secuencias.DELAY_ENTRE_ENVIOS_SEG, (60, 120))
         self.assertEqual(secuencias.ESTADOS_QUE_SACAN, ("won", "lost", "abandoned"))
+
+
+class TestPlanGateJob(FrappeTestCase):
+    """`avanzar` respeta el plan del SITIO, no el del usuario.
+
+    El scheduler corre como Administrator (y `plan.exigir_plan_minimo` exime a
+    la agencia), así que sin este gate un sitio Lite con una `Secuencia` activa
+    mandaba correo/WhatsApp igual. Con plan < `pro` el job es no-op silencioso
+    —un dict con `motivo`, nunca una excepción que spamee el Error Log."""
+
+    def _correr(self, plan_sitio, usuario="Administrator"):
+        with patch.object(secuencias.plan, "plan_de_este_sitio",
+                          return_value=plan_sitio), \
+                patch.object(secuencias.frappe.session, "user", usuario):
+            return _avanzar_mock([], _sec(pasos=[{"tipo": "Email"}]))
+
+    def test_lite_es_no_op_y_no_toca_la_base(self):
+        result, m = self._correr("lite")
+        self.assertEqual(result, {"activo": False, "motivo": "plan"})
+        m["get_all"].assert_not_called()
+        self.assertEqual(m["ejecutados"], [])
+
+    def test_gratuito_es_no_op(self):
+        result, _ = self._correr("gratuito")
+        self.assertEqual(result.get("motivo"), "plan")
+
+    def test_no_se_exime_por_usuario_de_agencia(self):
+        # Aunque el job corra como Administrator, el gate es del sitio: un
+        # `sofia_plan=lite` no se cuela por eso.
+        result, m = self._correr("lite", usuario="Administrator")
+        self.assertEqual(result, {"activo": False, "motivo": "plan"})
+        m["get_all"].assert_not_called()
+
+    def test_pro_procede(self):
+        _, m = self._correr("pro")
+        m["get_all"].assert_called_once()
+
+    def test_enterprise_procede(self):
+        _, m = self._correr("enterprise")
+        m["get_all"].assert_called_once()
+
