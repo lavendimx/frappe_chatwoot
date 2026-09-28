@@ -1135,6 +1135,21 @@ def _debe_salir(ins: dict) -> str | None:
             return "__esperar_humano__"
 
     if sec and ins.get("ultimo_envio_at") and ins.get("conversation_id"):
+        # Baseline = el más reciente entre el último ENVÍO real y la última
+        # respuesta del cliente YA registrada. Comparar solo contra
+        # `ultimo_envio_at` re-armaba el mismo pospuesto de 48 h en cada
+        # corrida (ese campo no avanza sin un envío real), así que la
+        # inscripción nunca se enfriaba ni reanudaba: quedaba congelada para
+        # siempre. Medido 2026-09-28: 11 inscripciones activas atrapadas
+        # (Laisha, IRMA JIMENEZ, Frida Ortega…); `forzar_paso` tampoco las
+        # destrababa. Incluir la respuesta registrada hace que el pospuesto
+        # ocurra UNA vez por respuesta nueva, no indefinidamente.
+        base = frappe.utils.get_datetime(ins["ultimo_envio_at"])
+        ultimo_msg = ins.get("ultimo_mensaje_cliente_at") or frappe.db.get_value(
+            "Secuencia Inscripcion", ins["name"], "ultimo_mensaje_cliente_at"
+        )
+        if ultimo_msg:
+            base = max(base, frappe.utils.get_datetime(ultimo_msg))
         try:
             datos = cw.list_messages(int(ins["conversation_id"]))
             for m in reversed(datos.get("payload") or []):
@@ -1144,7 +1159,7 @@ def _debe_salir(ins: dict) -> str | None:
                 creado = frappe.utils.get_datetime(
                     frappe.utils.datetime.datetime.fromtimestamp(m.get("created_at"))
                 )
-                if creado > frappe.utils.get_datetime(ins["ultimo_envio_at"]):
+                if creado > base:
                     # Deja constancia de cuándo respondió (el campo existe en
                     # el doctype desde el diseño original pero nunca se
                     # escribía) y avisa al equipo — punto 6 del docstring.
