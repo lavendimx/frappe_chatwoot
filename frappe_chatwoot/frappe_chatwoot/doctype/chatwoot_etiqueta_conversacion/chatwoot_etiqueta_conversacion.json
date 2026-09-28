@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-09-28 00:00:00.000000",
+ "description": "Asignación de una etiqueta del catálogo (Chatwoot Etiqueta) a una conversación de Chatwoot. Global para el equipo, reversible, no toca el estado de la conversación en Chatwoot.",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "conversation_id",
+  "etiqueta",
+  "asignado_por",
+  "asignado_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "conversation_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Conversation ID",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "etiqueta",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Etiqueta",
+   "options": "Chatwoot Etiqueta",
+   "reqd": 1
+  },
+  {
+   "fieldname": "asignado_por",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Asignado por",
+   "options": "User"
+  },
+  {
+   "fieldname": "asignado_at",
+   "fieldtype": "Datetime",
+   "label": "Asignado el"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Chatwoot",
+ "name": "Chatwoot Etiqueta Conversacion",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

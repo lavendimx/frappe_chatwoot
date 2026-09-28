@@ -34,7 +34,7 @@ from frappe_chatwoot.utils import chatwoot_client as cw
 from frappe_chatwoot.utils import telefono as tel
 from frappe_chatwoot.utils.chatwoot_contactos import _contacto_chatwoot
 
-from .chatwoot import _pause_conversation, validate_role
+from .chatwoot import _inboxes_del_sitio, _pause_conversation, validate_role
 
 # Cuántas notas/oportunidades devuelve el panel. Es una vista de contexto, no un
 # reporte: si alguien necesita el histórico completo abre el registro en el CRM.
@@ -370,7 +370,8 @@ def resolver_whatsapp(phone: str) -> dict:
 
 @frappe.whitelist()
 def start_conversation(inbox_id: int, phone: str, message: str = None, name: str = None,
-                       force: int = 0, adjuntos=None) -> dict:
+                       force: int = 0, adjuntos=None,
+                       deal: str = None, lead: str = None) -> dict:
     """Abre (o reutiliza) la conversación con ese número y manda el primer mensaje.
 
     Deja el agente IA PAUSADO: quien abre la conversación desde el CRM es una
@@ -386,12 +387,13 @@ def start_conversation(inbox_id: int, phone: str, message: str = None, name: str
     if not message and not adjuntos:
         frappe.throw("Escribe el mensaje con el que quieres abrir la conversación.")
     return abrir_conversacion(inbox_id=inbox_id, phone=phone, message=message,
-                              name=name, force=force, pausar=True, adjuntos=adjuntos)
+                              name=name, force=force, pausar=True, adjuntos=adjuntos,
+                              deal=deal, lead=lead)
 
 
 @frappe.whitelist()
 def asegurar_conversacion(inbox_id: int, phone: str, name: str = None,
-                          force: int = 0) -> dict:
+                          force: int = 0, deal: str = None, lead: str = None) -> dict:
     """Crea (o reutiliza) la conversación SIN mandar mensaje.
 
     Existe por el "programar" del primer mensaje: `programar_mensaje` exige un
@@ -401,7 +403,8 @@ def asegurar_conversacion(inbox_id: int, phone: str, name: str = None,
     """
     validate_role()
     return abrir_conversacion(inbox_id=inbox_id, phone=phone, message=None,
-                              name=name, force=force, pausar=True)
+                              name=name, force=force, pausar=True,
+                              deal=deal, lead=lead)
 
 
 def _parse_adjuntos(adjuntos) -> list:
@@ -444,9 +447,78 @@ def _enviar(conversation_id: int, message: str | None, adjuntos: list | None) ->
         cw.create_message(conversation_id, message, content_attributes=marca)
 
 
+def _buscar_hilo_del_contacto(contacto_id: int, inbox_id: int) -> dict | None:
+    """Hilo del contacto en CUALQUIER inbox del sitio (no solo el elegido).
+
+    Un mismo contacto puede haber escrito por más de un canal del mismo sitio
+    (WhatsApp + Messenger). Reusar solo el hilo del inbox elegido abría un
+    segundo hilo con la misma persona — justo lo que `abrir_conversacion` viene
+    a evitar. Se restringe a los inboxes del sitio (`_inboxes_del_sitio`), nunca
+    a la cuenta completa de Chatwoot: la misma cuenta sirve a varios clientes.
+
+    Preferencia: el mismo inbox que el pedido → un hilo activo (`open`/`pending`)
+    → el de actividad más reciente.
+    """
+    sitio = set(_inboxes_del_sitio())
+    sitio.add(frappe.utils.cint(inbox_id))
+    candidatos = [
+        c for c in cw.get_conversations_for_contact(contacto_id)
+        if frappe.utils.cint(c.get("inbox_id")) in sitio
+    ]
+    if not candidatos:
+        return None
+    return max(
+        candidatos,
+        key=lambda c: (
+            1 if frappe.utils.cint(c.get("inbox_id")) == frappe.utils.cint(inbox_id) else 0,
+            1 if c.get("status") in ("open", "pending") else 0,
+            c.get("last_activity_at") or c.get("created_at") or 0,
+        ),
+    )
+
+
+def _escribir_conversation_id(conversation_id: int, deal=None, lead=None,
+                              phone: str = None) -> None:
+    """Escribe el id del hilo en el `CRM Deal`/`CRM Lead` de origen.
+
+    El campo `chatwoot_conversation_id` es lo que le permite al CRM volver a
+    abrir el MISMO hilo en vez de crear otro (contrato con el SPA, 2026-09-28);
+    antes de esto nadie lo escribía en el flujo de la bandeja. Verificado en
+    `tabCustom Field`: existe en ambos doctypes, tipo Data.
+
+    Si el llamador dice cuál es el registro (`deal`/`lead`) se escribe ese; si
+    no, se resuelve por teléfono y se completan SOLO los registros que no tengan
+    ya un hilo anotado — así no se pisa una conversación distinta ya escrita.
+    """
+    objetivos: list[tuple[str, str]] = []
+    if deal:
+        objetivos.append(("CRM Deal", deal))
+    if lead:
+        objetivos.append(("CRM Lead", lead))
+    if not objetivos:
+        contacto = _contacto_por_telefono(phone)
+        if not contacto:
+            return
+        for doctype in ("CRM Deal", "CRM Lead"):
+            filas = frappe.get_all(
+                doctype,
+                filters={"contact": contacto},
+                fields=["name", "chatwoot_conversation_id"],
+            )
+            objetivos.extend(
+                (doctype, f.name) for f in filas
+                if not (f.chatwoot_conversation_id or "").strip()
+            )
+    for doctype, name in objetivos:
+        if name and frappe.db.exists(doctype, name):
+            frappe.db.set_value(doctype, name, "chatwoot_conversation_id",
+                                str(conversation_id), update_modified=False)
+
+
 def abrir_conversacion(inbox_id: int, phone: str, message: str = None,
                        name: str = None, force: int = 0,
-                       pausar: bool = True, adjuntos: list | None = None) -> dict:
+                       pausar: bool = True, adjuntos: list | None = None,
+                       deal: str = None, lead: str = None) -> dict:
     """Abre (o reutiliza) la conversación con ese número.
 
     Reutiliza a propósito: si el contacto ya tiene un hilo abierto en ese inbox,
@@ -461,6 +533,11 @@ def abrir_conversacion(inbox_id: int, phone: str, message: str = None,
 
     `message` y `adjuntos` son opcionales: sin ninguno de los dos solo se
     asegura que el hilo exista (ver `asegurar_conversacion`).
+
+    Reutiliza el hilo del contacto en CUALQUIER inbox del sitio (no solo el
+    elegido) y reabre uno `resolved`/`snoozed` en vez de crear un segundo. El
+    id resultante se escribe de vuelta en el `CRM Deal`/`CRM Lead` de origen
+    (`chatwoot_conversation_id`), para que el CRM abra el mismo hilo.
     """
     inbox_id = frappe.utils.cint(inbox_id)
     message = (message or "").strip()
@@ -494,6 +571,21 @@ def abrir_conversacion(inbox_id: int, phone: str, message: str = None,
 
     if contacto:
         contacto_id = contacto.get("id")
+        # ¿Ya hay hilo con este contacto en algún canal del sitio? Se escribe ahí.
+        hilo = _buscar_hilo_del_contacto(contacto_id, inbox_id)
+        if hilo:
+            conversation_id = frappe.utils.cint(hilo.get("id"))
+            reabierta = hilo.get("status") not in ("open", "pending")
+            if reabierta:
+                cw.toggle_conversation_status(conversation_id, "open")
+            _enviar(conversation_id, message, adjuntos)
+            if pausar:
+                _pause_conversation(conversation_id, hilo.get("inbox_id"))
+            _escribir_conversation_id(conversation_id, deal=deal, lead=lead, phone=e164)
+            return {"conversation_id": conversation_id, "reutilizada": True,
+                    "contact_id": contacto_id, "reabierta": reabierta}
+
+        # Sin hilo reutilizable: se abre uno nuevo en el inbox elegido.
         detalle = cw.get_contact(contacto_id)
         buzones = detalle.get("contact_inboxes") or []
         source_id = next(
@@ -503,13 +595,6 @@ def abrir_conversacion(inbox_id: int, phone: str, message: str = None,
         if not source_id:
             creado = cw.create_contact_inbox(contact_id=contacto_id, inbox_id=inbox_id, source_id=jid)
             source_id = (creado.get("payload") or creado).get("source_id") or jid
-        # ¿Ya hay hilo abierto? Se escribe ahí.
-        for conv in cw.get_conversations_for_contact(contacto_id):
-            if conv.get("inbox_id") == inbox_id and conv.get("status") in ("open", "pending"):
-                _enviar(conv["id"], message, adjuntos)
-                if pausar:
-                    _pause_conversation(conv["id"], inbox_id)
-                return {"conversation_id": conv["id"], "reutilizada": True, "contact_id": contacto_id}
     else:
         nuevo = cw.create_contact(
             inbox_id=inbox_id,
@@ -532,4 +617,5 @@ def abrir_conversacion(inbox_id: int, phone: str, message: str = None,
     _enviar(conversation_id, message, adjuntos)
     if pausar:
         _pause_conversation(conversation_id, inbox_id)
+    _escribir_conversation_id(conversation_id, deal=deal, lead=lead, phone=e164)
     return {"conversation_id": conversation_id, "reutilizada": False, "contact_id": contacto_id}

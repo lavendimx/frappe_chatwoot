@@ -706,17 +706,125 @@ def _es_grupo(sender: dict) -> bool:
     return (sender.get("identifier") or "").endswith("@g.us")
 
 
-def _shape_conversation(conv: dict, pausadas: set = None, archivadas: set = None) -> dict:
+# Tokens de color válidos: exactamente los mismos que CRM Deal Status.color
+# (crm/fcrm/doctype/crm_deal_status/crm_deal_status.json). Se repiten aquí en vez
+# de importarlos para no depender de la app `crm` desde frappe_chatwoot.
+COLORES_CONVERSACION = (
+    "black", "gray", "blue", "green", "red", "pink", "orange",
+    "amber", "yellow", "cyan", "teal", "violet", "purple",
+)
+
+
+def _validar_color(color: str):
+    if color and color not in COLORES_CONVERSACION:
+        frappe.throw(f"Color inválido: {color}")
+
+
+def _inbox_de_conversacion(cid: int, inbox_id=None) -> int:
+    """Inbox de una conversación, validado contra los inboxes de ESTE sitio.
+
+    Aislamiento entre clientes, mismo criterio y misma fuente que
+    get_conversations/anclar: el inbox se toma del parámetro o de la propia
+    conversación en Chatwoot; si no se puede determinar se rechaza en vez de
+    asumir."""
+    inbox = frappe.utils.cint(inbox_id) if inbox_id else None
+    if not inbox:
+        try:
+            inbox = frappe.utils.cint(cw.get_conversation(cid).get("inbox_id"))
+        except cw.ChatwootAPIError:
+            inbox = None
+    if not inbox:
+        frappe.throw("No se pudo verificar el canal de la conversación")
+    if inbox not in _inboxes_del_sitio():
+        frappe.throw(
+            f"El inbox {inbox} no pertenece a este sitio.",
+            frappe.PermissionError,
+        )
+    return inbox
+
+
+def _etiquetas_y_colores(cids: list) -> tuple[dict, dict]:
+    """Etiquetas y color de un lote de conversaciones, en 2 consultas (una por
+    doctype) — nunca una por conversación. Ver _shape_conversation.
+
+    DEFENSIVO a propósito: los 3 doctypes de etiquetas/color pueden no existir
+    todavía en un sitio donde el `migrate` está pendiente. En ese caso degrada a
+    `({}, {})` para que la bandeja pinte sin labels/color en vez de reventar
+    (mismo criterio que _ids_marcados)."""
+    cids = [frappe.utils.cint(c) for c in (cids or []) if c]
+    if not cids:
+        return {}, {}
+    cids_str = [str(c) for c in cids]
+
+    asignaciones = {}
+    colores = {}
+    try:
+        filas = frappe.get_all(
+            "Chatwoot Etiqueta Conversacion",
+            filters={"conversation_id": ["in", cids_str]},
+            fields=["conversation_id", "etiqueta"],
+            ignore_permissions=True,
+        )
+        nombres = {f["etiqueta"] for f in filas if f.get("etiqueta")}
+        catalogo = {}
+        if nombres:
+            catalogo = {
+                e["name"]: e
+                for e in frappe.get_all(
+                    "Chatwoot Etiqueta",
+                    filters={"name": ["in", list(nombres)]},
+                    fields=["name", "color", "activo", "orden"],
+                    ignore_permissions=True,
+                )
+            }
+        for f in filas:
+            et = catalogo.get(f.get("etiqueta"))
+            if not et or not et.get("activo"):
+                continue
+            cid = frappe.utils.cint(f["conversation_id"])
+            asignaciones.setdefault(cid, []).append(
+                (
+                    frappe.utils.cint(et.get("orden")),
+                    {"nombre": et["name"], "color": et.get("color") or "blue"},
+                )
+            )
+        for cid in asignaciones:
+            asignaciones[cid] = [
+                etiqueta for _, etiqueta in sorted(asignaciones[cid], key=lambda p: p[0])
+            ]
+    except Exception:
+        asignaciones = {}
+    try:
+        for fila in frappe.get_all(
+            "Chatwoot Color Conversacion",
+            filters={"conversation_id": ["in", cids_str]},
+            fields=["conversation_id", "color"],
+            ignore_permissions=True,
+        ):
+            colores[frappe.utils.cint(fila["conversation_id"])] = fila.get("color")
+    except Exception:
+        colores = {}
+    return asignaciones, colores
+
+
+def _shape_conversation(
+    conv: dict,
+    pausadas: set = None,
+    archivadas: set = None,
+    ancladas: set = None,
+    etiquetas: dict = None,
+    colores: dict = None,
+) -> dict:
     """Aplana el objeto de Chatwoot a lo que la bandeja necesita pintar.
 
     El preview sale de `last_non_activity_message`, que _scrub_conversation_preview
     ya dejó en None si era una nota privada — por eso aquí se lee sin volver a
     filtrar: la invariante de confidencialidad ya se aplicó aguas arriba.
 
-    `pausadas`/`archivadas` son conjuntos de conversation_id precargados de una
-    sola consulta por quien llama en lote. Sin eso esto haría dos SELECT por
+    `pausadas`/`archivadas`/`ancladas` son conjuntos de conversation_id precargados
+    de una sola consulta por quien llama en lote. Sin eso esto haría tres SELECT por
     conversación y el barrido completo de la bandeja (ver get_conversations)
-    dispararía ~180 consultas por carga."""
+    dispararía ~270 consultas por carga."""
     meta = conv.get("meta") or {}
     sender = meta.get("sender") or {}
     last = conv.get("last_non_activity_message") or {}
@@ -732,6 +840,32 @@ def _shape_conversation(conv: dict, pausadas: set = None, archivadas: set = None
         if archivadas is not None
         else bool(frappe.db.exists("Chatwoot Archivo", {"conversation_id": cid}))
     )
+    # Anclada (fijada al tope de la bandeja). El doctype puede no existir todavía
+    # si el `migrate` está pendiente (ver _ids_marcados, que ya degrada en lote):
+    # aquí se envuelve el camino de una sola conversación para que la bandeja no
+    # reviente y simplemente pinte pinned=False.
+    try:
+        pinned = (
+            cid in ancladas
+            if ancladas is not None
+            else bool(frappe.db.exists("Chatwoot Anclaje", {"conversation_id": cid}))
+        )
+    except Exception:
+        pinned = False
+    # Etiquetas del catálogo + color suelto (Fase 2 de la bandeja). El llamador
+    # en lote precarga ambos; sin batch se resuelven solo para esta conversación.
+    # Si el doctype/tabla no existe todavía, _etiquetas_y_colores degrada a
+    # vacío — la bandeja pinta sin labels/color en vez de reventar.
+    try:
+        if etiquetas is not None and colores is not None:
+            labels = etiquetas.get(cid, [])
+            color = colores.get(cid)
+        else:
+            lote_et, lote_co = _etiquetas_y_colores([cid])
+            labels = etiquetas.get(cid, []) if etiquetas is not None else lote_et.get(cid, [])
+            color = colores.get(cid) if colores is not None else lote_co.get(cid)
+    except Exception:
+        labels, color = [], None
     return {
         "id": cid,
         "inbox_id": conv.get("inbox_id"),
@@ -754,6 +888,14 @@ def _shape_conversation(conv: dict, pausadas: set = None, archivadas: set = None
         # lavendi.mx: conversación archivada por el equipo — sale de la bandeja
         # principal sin borrarse ni tocar su estado en Chatwoot (ver archivar()).
         "archived": archived,
+        # lavendi.mx: conversación anclada por el equipo — sube al tope de la
+        # bandeja sin alterar su estado en Chatwoot (ver anclar()).
+        "pinned": pinned,
+        # lavendi.mx: etiquetas del catálogo asignadas a esta conversación y
+        # color suelto (Fase 2 de la bandeja). Ver Chatwoot Etiqueta /
+        # Chatwoot Etiqueta Conversacion / Chatwoot Color Conversacion.
+        "labels": labels,
+        "color": color,
         # lavendi.mx: grupo de WhatsApp. La bandeja los pinta en una sección
         # aparte, debajo de las conversaciones individuales.
         "is_group": _es_grupo(sender),
@@ -886,7 +1028,12 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
 
     pausadas = _ids_marcados("Chatwoot Pausa")
     archivadas_ids = _ids_marcados("Chatwoot Archivo")
-    shaped = [_shape_conversation(c, pausadas, archivadas_ids) for c in conversations]
+    ancladas_ids = _ids_marcados("Chatwoot Anclaje")
+    etiquetas, colores = _etiquetas_y_colores([c.get("id") for c in conversations])
+    shaped = [
+        _shape_conversation(c, pausadas, archivadas_ids, ancladas_ids, etiquetas, colores)
+        for c in conversations
+    ]
     # El archivado es una vista, no un borrado: o se ven solo las archivadas o
     # solo las vivas, nunca mezcladas — que es justo lo que se pidió evitar.
     quiere_archivadas = bool(frappe.utils.cint(archivadas))
@@ -897,7 +1044,16 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
     # por debajo de pendientes viejos (09-08). El badge de no leídos sigue marcando
     # lo pendiente sin tocar el orden. Va en el backend para que valga en TODAS las
     # vistas (individuales, grupos y archivadas), sin depender de cada pantalla.
-    shaped.sort(key=lambda c: c.get("last_activity_at") or 0, reverse=True)
+    #
+    # Encima de la recencia, las ancladas van SIEMPRE al tope (Alejandro,
+    # 2026-09-28): el anclaje es una decisión de la vista y no toca
+    # last_activity_at, así que sin esta clave quedarían enterradas por cualquier
+    # hilo reciente. Dentro de cada grupo (ancladas / no ancladas) se conserva la
+    # recencia pura de arriba.
+    shaped.sort(
+        key=lambda c: (bool(c.get("pinned")), c.get("last_activity_at") or 0),
+        reverse=True,
+    )
     return shaped
 
 
@@ -925,8 +1081,14 @@ def obtener_conversacion(conversation_id: int) -> dict | None:
         return None
     if not conv:
         return None
+    etiquetas, colores = _etiquetas_y_colores([cid])
     return _shape_conversation(
-        conv, _ids_marcados("Chatwoot Pausa"), _ids_marcados("Chatwoot Archivo")
+        conv,
+        _ids_marcados("Chatwoot Pausa"),
+        _ids_marcados("Chatwoot Archivo"),
+        _ids_marcados("Chatwoot Anclaje"),
+        etiquetas,
+        colores,
     )
 
 
@@ -977,6 +1139,252 @@ def desarchivar(conversation_id: int) -> dict:
 
 
 @frappe.whitelist()
+def anclar(conversation_id: int, inbox_id=None) -> dict:
+    """Fija una conversación al tope de la bandeja principal.
+
+    Espejo de archivar(): es una bandera propia del CRM, NO el estado de
+    Chatwoot — no toca `resolved`/`snoozed` ni lo que ve el agente IA. Global
+    para el equipo, no por usuario, mismo criterio que Chatwoot Pausa/Archivo:
+    la bandeja es compartida. Se registra quién ancló y cuándo.
+
+    Reversible con desanclar(). Idempotente: anclar dos veces no duplica.
+
+    Aislamiento entre clientes: solo se ancla una conversación cuyo inbox
+    pertenece a ESTE sitio (misma fuente que get_conversations/list_inboxes). El
+    inbox se toma del parámetro o, si no viene, de la propia conversación en
+    Chatwoot; si no se puede determinar, se rechaza en vez de asumir.
+    """
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        frappe.throw("conversation_id inválido")
+
+    inbox = frappe.utils.cint(inbox_id) if inbox_id else None
+    if not inbox:
+        try:
+            inbox = frappe.utils.cint(cw.get_conversation(cid).get("inbox_id"))
+        except cw.ChatwootAPIError:
+            inbox = None
+    if not inbox:
+        frappe.throw("No se pudo verificar el canal de la conversación")
+    if inbox not in _inboxes_del_sitio():
+        frappe.throw(
+            f"El inbox {inbox} no pertenece a este sitio.",
+            frappe.PermissionError,
+        )
+
+    if frappe.db.exists("Chatwoot Anclaje", {"conversation_id": cid}):
+        return {"ok": True, "pinned": True}
+    frappe.get_doc(
+        {
+            "doctype": "Chatwoot Anclaje",
+            "conversation_id": cid,
+            "inbox_id": str(inbox),
+            "anclado_por": frappe.session.user,
+            "anclado_at": frappe.utils.now_datetime(),
+        }
+    ).insert(ignore_permissions=True)
+    return {"ok": True, "pinned": True}
+
+
+@frappe.whitelist()
+def desanclar(conversation_id: int) -> dict:
+    """Devuelve la conversación al orden por recencia. Espejo de anclar()."""
+    validate_role()
+    cid = frappe.utils.cint(conversation_id)
+    name = frappe.db.exists("Chatwoot Anclaje", {"conversation_id": cid})
+    if name:
+        frappe.delete_doc("Chatwoot Anclaje", name, ignore_permissions=True)
+    return {"ok": True, "pinned": False}
+
+
+@frappe.whitelist()
+def listar_etiquetas() -> list[dict]:
+    """Catálogo de etiquetas del sitio, ordenado por `orden`.
+
+    Devuelve también las inactivas (con `activo`): el catálogo es configurable
+    desde la UI y quien lo administra necesita ver lo que apagó. La bandeja
+    filtra por `activo`, y `_etiquetas_y_colores` ni siquiera pinta una etiqueta
+    inactiva."""
+    validate_role()
+    try:
+        filas = frappe.get_all(
+            "Chatwoot Etiqueta",
+            fields=["name", "color", "orden", "activo"],
+            order_by="orden asc, name asc",
+            ignore_permissions=True,
+        )
+    except Exception:
+        return []
+    return [
+        {
+            "nombre": f["name"],
+            "color": f.get("color") or "blue",
+            "orden": frappe.utils.cint(f.get("orden")),
+            "activo": bool(f.get("activo")),
+        }
+        for f in filas
+    ]
+
+
+@frappe.whitelist()
+def crear_etiqueta(nombre: str, color: str = "blue", orden=0) -> dict:
+    """Crea una etiqueta en el catálogo del sitio. Espejo de `anclar` en estilo:
+    endpoint whitelisted, rol-gateado, autoreversible. Falla si ya existe (el
+    nombre es la llave) en vez de pisar la etiqueta existente."""
+    validate_role()
+    nombre = (nombre or "").strip()
+    if not nombre:
+        frappe.throw("nombre es requerido")
+    _validar_color(color)
+    if frappe.db.exists("Chatwoot Etiqueta", nombre):
+        frappe.throw(f"La etiqueta «{nombre}» ya existe")
+    frappe.get_doc(
+        {
+            "doctype": "Chatwoot Etiqueta",
+            "nombre": nombre,
+            "color": color or "blue",
+            "orden": frappe.utils.cint(orden),
+            "activo": 1,
+        }
+    ).insert(ignore_permissions=True)
+    return {"ok": True, "nombre": nombre}
+
+
+@frappe.whitelist()
+def editar_etiqueta(nombre: str, color: str = None, activo=None, orden=None) -> dict:
+    """Edita una etiqueta del catálogo: color, activo y/u orden. Los tres son
+    opcionales; solo se toca lo que llega. El nombre no se renombra (es la llave
+    y las asignaciones lo referencian por Link)."""
+    validate_role()
+    nombre = (nombre or "").strip()
+    name = frappe.db.exists("Chatwoot Etiqueta", nombre)
+    if not name:
+        frappe.throw(f"La etiqueta «{nombre}» no existe")
+    doc = frappe.get_doc("Chatwoot Etiqueta", name)
+    if color is not None:
+        _validar_color(color)
+        doc.color = color
+    if activo is not None:
+        doc.activo = 1 if frappe.utils.cint(activo) else 0
+    if orden is not None:
+        doc.orden = frappe.utils.cint(orden)
+    doc.save(ignore_permissions=True)
+    return {"ok": True, "nombre": name}
+
+
+@frappe.whitelist()
+def etiquetar(conversation_id: int, etiqueta: str) -> dict:
+    """Asigna una etiqueta del catálogo a una conversación.
+
+    Bandera propia del CRM, NO una etiqueta nativa de Chatwoot: no toca el estado
+    de la conversación ni lo que ve el agente IA. Global para el equipo, mismo
+    criterio que Chatwoot Pausa/Archivo/Anclaje. Idempotente: etiquetar dos veces
+    no duplica (a diferencia de Anclaje, aquí la llave no es el conversation_id,
+    así que la idempotencia la da el `exists` explícito).
+
+    Aislamiento entre clientes: solo se etiqueta una conversación cuyo inbox
+    pertenece a ESTE sitio (misma fuente que get_conversations/anclar)."""
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        frappe.throw("conversation_id inválido")
+    etiqueta = (etiqueta or "").strip()
+    if not etiqueta:
+        frappe.throw("etiqueta es requerida")
+    _inbox_de_conversacion(cid)
+    if not frappe.db.exists("Chatwoot Etiqueta", etiqueta):
+        frappe.throw(f"La etiqueta «{etiqueta}» no existe")
+    if frappe.db.exists(
+        "Chatwoot Etiqueta Conversacion",
+        {"conversation_id": str(cid), "etiqueta": etiqueta},
+    ):
+        return {"ok": True}
+    frappe.get_doc(
+        {
+            "doctype": "Chatwoot Etiqueta Conversacion",
+            "conversation_id": str(cid),
+            "etiqueta": etiqueta,
+            "asignado_por": frappe.session.user,
+            "asignado_at": frappe.utils.now_datetime(),
+        }
+    ).insert(ignore_permissions=True)
+    return {"ok": True}
+
+
+@frappe.whitelist()
+def desetiquetar(conversation_id: int, etiqueta: str) -> dict:
+    """Quita una etiqueta de una conversación. Espejo de `etiquetar`. Idempotente:
+    si no estaba, no hace nada."""
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        frappe.throw("conversation_id inválido")
+    etiqueta = (etiqueta or "").strip()
+    _inbox_de_conversacion(cid)
+    name = frappe.db.exists(
+        "Chatwoot Etiqueta Conversacion",
+        {"conversation_id": str(cid), "etiqueta": etiqueta},
+    )
+    if name:
+        frappe.delete_doc("Chatwoot Etiqueta Conversacion", name, ignore_permissions=True)
+    return {"ok": True}
+
+
+@frappe.whitelist()
+def definir_color(conversation_id: int, color: str) -> dict:
+    """Pinta la conversación con un color suelto, independiente de las etiquetas.
+    Un color por conversación (el conversation_id es la llave). Reversible con
+    limpiar_color(). No toca Chatwoot ni el estado del hilo.
+
+    Aislamiento entre clientes: mismo chequeo de inbox que etiquetar()."""
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        frappe.throw("conversation_id inválido")
+    _validar_color(color)
+    _inbox_de_conversacion(cid)
+    name = frappe.db.exists("Chatwoot Color Conversacion", {"conversation_id": str(cid)})
+    if name:
+        doc = frappe.get_doc("Chatwoot Color Conversacion", name)
+        doc.color = color
+        doc.save(ignore_permissions=True)
+    else:
+        frappe.get_doc(
+            {
+                "doctype": "Chatwoot Color Conversacion",
+                "conversation_id": str(cid),
+                "color": color,
+            }
+        ).insert(ignore_permissions=True)
+    return {"ok": True, "color": color}
+
+
+@frappe.whitelist()
+def limpiar_color(conversation_id: int) -> dict:
+    """Quita el color suelto de una conversación. Espejo de `definir_color`."""
+    validate_role()
+    if not is_chatwoot_enabled():
+        frappe.throw("Chatwoot integration is not enabled")
+    cid = frappe.utils.cint(conversation_id)
+    if not cid:
+        frappe.throw("conversation_id inválido")
+    _inbox_de_conversacion(cid)
+    name = frappe.db.exists("Chatwoot Color Conversacion", {"conversation_id": str(cid)})
+    if name:
+        frappe.delete_doc("Chatwoot Color Conversacion", name, ignore_permissions=True)
+    return {"ok": True}
+
+
+@frappe.whitelist()
 def search_conversations(q: str = "", limit=40) -> list[dict]:
     """Buscador de la bandeja: encuentra conversaciones por nombre, teléfono o
     correo del contacto, ignorando el filtro de estado y canal de la vista.
@@ -1012,8 +1420,9 @@ def search_conversations(q: str = "", limit=40) -> list[dict]:
 
     pausadas = _ids_marcados("Chatwoot Pausa")
     archivadas = _ids_marcados("Chatwoot Archivo")
+    ancladas = _ids_marcados("Chatwoot Anclaje")
     vistas = set()
-    filas = []
+    crudas = []
     for contacto in contactos:
         try:
             convs = cw.get_conversations_for_contact(contacto.get("id"))
@@ -1027,7 +1436,13 @@ def search_conversations(q: str = "", limit=40) -> list[dict]:
             # El buscador SÍ devuelve archivadas (marcadas como tales): ya ignora
             # el filtro de estado y canal por el mismo motivo — "no aparece" se
             # lee como "no existe" y manda a la gente a buscar fuera del CRM.
-            filas.append(_shape_conversation(conv, pausadas, archivadas))
+            crudas.append(conv)
+
+    etiquetas, colores = _etiquetas_y_colores([c.get("id") for c in crudas])
+    filas = [
+        _shape_conversation(conv, pausadas, archivadas, ancladas, etiquetas, colores)
+        for conv in crudas
+    ]
 
     # El buscador ignora a proposito el filtro de estado/canal de la vista, pero NO
     # debe cruzar de cliente: se limita a los inboxes de ESTE sitio (mismo

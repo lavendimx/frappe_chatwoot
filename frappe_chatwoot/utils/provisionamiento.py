@@ -162,8 +162,17 @@ _ABIERTAS = {"status": ["not in", ["Won", "Lost"]]}
 
 VISTAS_CLIENTE = [
     {
+        # La vista por defecto de Oportunidades es una LISTA (no el kanban),
+        # ordenada por valor desc (la decisión registrada el 2026-09-27, igual que
+        # crm.lavendi.mx). `route_name: "Deals"` es lo que hace que el router del
+        # SPA la elija al entrar a `/crm/deals`: solo se aplica a la vista con
+        # `is_default=1`. El kanban queda como vista alterna, ya no por defecto.
+        "label": "Lista", "type": "list", "route_name": "Deals",
+        "is_default": 1, "pinned": 0, "filters": _ABIERTAS, "order_by": "deal_value desc",
+    },
+    {
         "label": "Embudo de ventas", "type": "kanban", "route_name": "Deals",
-        "is_default": 1, "pinned": 1, "filters": _ABIERTAS, "order_by": "modified desc",
+        "is_default": 0, "pinned": 1, "filters": _ABIERTAS, "order_by": "modified desc",
         "column_field": "status", "title_field": "organization",
         "kanban_fields": ["deal_value", "deal_owner", "mobile_no", "modified"],
     },
