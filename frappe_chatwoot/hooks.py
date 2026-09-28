@@ -69,6 +69,21 @@ scheduler_events = {
         # línea si `Chatwoot Settings.planeacion_llamadas_activo` está en 0.
         "0 7-21 * * *": [
             "frappe_chatwoot.utils.planeacion_llamadas.generar_planeaciones",
+            # Quick summary IA por contacto — job hermano del de arriba (misma
+            # familia "actividad y notas del contacto", 2026-09-27): barre citas
+            # ya terminadas y deja una nota "Resumen — <fecha>" en la ficha.
+            # Sale en la primera línea si
+            # `Chatwoot Settings.resumen_contacto_activo` está en 0. Misma clave
+            # que la planeación para no crear otra entrada horaria.
+            "frappe_chatwoot.utils.resumen_contacto.generar_resumenes",
+        ],
+        # Notas de Gemini → CRM: trae los correos de gemini-notes@ ya parseados
+        # por el agente-ia y los escribe al CRM (nota + comentario con el Doc +
+        # tarea por próximo paso). Cada 30 min dentro de horario hábil — las
+        # notas de videollamada no son urgentes, pero tampoco diarias. Sale en
+        # la primera línea si `Chatwoot Settings.notas_gemini_activo` está en 0.
+        "*/30 7-21 * * *": [
+            "frappe_chatwoot.utils.notas_gemini.generar_notas_gemini",
         ],
         # Campañas de email programadas — plan campanas-contenedor-y-cadencia.md.
         # Barrido diario en horario laboral, no por hora: la cadencia se mide
@@ -189,10 +204,15 @@ doc_events = {
             # sin esto el contacto queda invisible en Cobranza (2026-09-25,
             # caso Alma Cabello). Ver utils/cliente_erp.py.
             "frappe_chatwoot.utils.cliente_erp.crear_customer_si_falta",
+            # Contact -> contacto de Google (People API). Fail-open: no-op
+            # hasta que el sitio declare `google_contacts_account` en su
+            # site_config. Ver utils/google_contactos.py.
+            "frappe_chatwoot.utils.google_contactos.encolar",
         ],
         "after_insert": [
             "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_nombre",
             "frappe_chatwoot.utils.cliente_erp.crear_customer_si_falta",
+            "frappe_chatwoot.utils.google_contactos.encolar",
         ],
         # crm_organization (Link al catalogo, 2026-09-17) -> company_name.
         "validate": "frappe_chatwoot.utils.chatwoot_contactos.sincronizar_organizacion",
