@@ -61,6 +61,13 @@ escriben solos: exigen un dato humano y van a mano (ver §5 del registro de capa
    **404**. Aplica a todo vhost que proxye a `8094` (`sofiav2`, `agenda`, `sixgardens`).
    El upstream de socket.io vive en `conf.d/00-sofia-socketio-upstream.conf` — incluirlo
    dentro de cada vhost choca con `duplicate upstream`.
+4. ⚠ **Replicar los dos `location =` del service worker** de `/etc/nginx/sites-available/sofiav2.lavendi.mx`
+   (L28-64), con `X-Frappe-Site-Name: <cliente>.lavendi.mx`: `location = /assets/crm/frontend/sw.js`
+   con `add_header Service-Worker-Allowed "/crm/" always;` y `location = /assets/crm/frontend/registerSW.js`
+   con `Cache-Control: no-cache`. Sin el primero el service worker de la PWA no registra
+   (`navigator.serviceWorker.ready` colgado → sin push/offline); sin el segundo el fix del
+   scope puede tardar 12 h en llegar por caché. Bloque listo en `patches/nginx-service-worker-snippet.conf`.
+   *(Detectado 2026-09-28: los 8 vhosts de cliente anteriores no lo tenían.)*
 
 ### Conectar el agente al sitio (el "switcher")
 
