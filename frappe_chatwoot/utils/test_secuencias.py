@@ -175,7 +175,11 @@ class TestDebeSalir(FrappeTestCase):
             if doctype == "Secuencia":
                 return parar
             if doctype == "Secuencia Inscripcion":
-                return hermana
+                # filtro por dict = búsqueda de la hermana; por nombre+campo =
+                # baseline de `_debe_salir` (devuelve None)
+                if args and isinstance(args[0], dict):
+                    return hermana
+                return None
             return None
         return patch.object(secuencias.frappe.db, "get_value", side_effect=fake)
 
@@ -201,9 +205,27 @@ class TestDebeSalir(FrappeTestCase):
         # Puente multi-contacto (18-sep): desde el 24-sep la respuesta de la
         # hermana NO saca — devuelve `__esperar_humano__`, como la propia.
         ins = _ins("INS-1")
+        reciente = secuencias.frappe.utils.add_to_date(
+            secuencias.frappe.utils.now_datetime(), hours=-2)
         with self._patch_db(deal_estado={"ghl_status": "open", "status": "Open"},
-                            parar=1, hermana=frappe._dict({"name": "INS-2", "contacto": "CONT-2"})):
+                            parar=1, hermana=frappe._dict({"name": "INS-2",
+                                                           "contacto": "CONT-2",
+                                                           "modified": reciente})):
             self.assertEqual(secuencias._debe_salir(ins), "__esperar_humano__")
+
+    def test_reanuda_si_la_hermana_respondio_hace_mas_de_48h(self):
+        # Ese estado es terminal y nada lo limpia: sin la cota temporal el
+        # pospuesto de 48 h se re-armaba en cada corrida PARA SIEMPRE
+        # (bug medido 2026-09-28). Pasado el enfriamiento, la inscripción
+        # sigue en vez de quedarse atrapada.
+        ins = _ins("INS-1")
+        viejo = secuencias.frappe.utils.add_to_date(
+            secuencias.frappe.utils.now_datetime(), hours=-72)
+        with self._patch_db(deal_estado={"ghl_status": "open", "status": "Open"},
+                            parar=1, hermana=frappe._dict({"name": "INS-2",
+                                                           "contacto": "CONT-2",
+                                                           "modified": viejo})):
+            self.assertIsNone(secuencias._debe_salir(ins))
 
     def test_espera_si_el_contacto_respondio_despues_del_ultimo_envio(self):
         ins = _ins("INS-1", conversation_id="77",

@@ -152,6 +152,14 @@ MAX_CORRIDA_DEFAULT = 20
 # y el siguiente.
 DELAY_ENTRE_ENVIOS_SEG = (60, 120)
 
+# Presupuesto de reloj por corrida. El job corre en la cola `default` con
+# timeout de 300 s (frappe `get_queues_timeout`); una corrida que lo pasa muere
+# con `JobTimeoutException` A MITAD de un envío, y eso abre la ventana entre el
+# envío y su commit (re-envío). Se corta limpio antes y lo que quede pendiente
+# lo retoma la corrida siguiente. Medido 2026-09-28: las corridas de 12:00 y
+# 14:00 murieron a los 300 s con el tope en 4 envíos + el delay anti-baneo.
+PRESUPUESTO_CORRIDA_SEG = 250
+
 # Estados de `CRM Deal.ghl_status` que sacan de la secuencia. Un deal ganado o
 # perdido no debe seguir recibiendo mensajes de venta — en GHL lo hacía el
 # workflow «8. Salida por Venta Ganada».
@@ -1128,11 +1136,20 @@ def _debe_salir(ins: dict) -> str | None:
             "Secuencia Inscripcion",
             {"deal": ins["deal"], "secuencia": ins["secuencia"],
              "estado": "Salió por respuesta", "name": ["!=", ins["name"]]},
-            ["name", "contacto"], as_dict=True,
+            ["name", "contacto", "modified"], as_dict=True,
         )
         if hermana:
-            # Ya no SACA: espera, igual que la respuesta propia (ver abajo).
-            return "__esperar_humano__"
+            # Espera solo DENTRO del enfriamiento; pasado el plazo se reanuda.
+            # Ese estado es terminal y nada lo limpia, así que sin la cota
+            # temporal el pospuesto de 48 h se re-armaba en cada corrida PARA
+            # SIEMPRE — el mismo defecto que el baseline de la respuesta propia
+            # (ver `_debe_salir`, 2026-09-28). Con la cota, un deal que respondió
+            # hace mucho deja de bloquear a su contacto hermano.
+            salida_hermana = frappe.utils.get_datetime(hermana.get("modified"))
+            if not salida_hermana or (frappe.utils.now_datetime() - salida_hermana
+                                      < frappe.utils.datetime.timedelta(
+                                          hours=ESPERA_TRAS_RESPUESTA_HORAS)):
+                return "__esperar_humano__"
 
     if sec and ins.get("ultimo_envio_at") and ins.get("conversation_id"):
         # Baseline = el más reciente entre el último ENVÍO real y la última
@@ -1212,8 +1229,15 @@ def avanzar():
     # secuencias juntas — hoy solo existe una, pero el freno de ráfaga es del
     # canal físico, no de la secuencia). Ver DELAY_ENTRE_ENVIOS_SEG arriba.
     envios_whatsapp_en_corrida = 0
+    inicio_corrida = time.monotonic()
 
     for ins in pendientes:
+        # Presupuesto de corrida: nunca pasarse del timeout del job. Si ya se
+        # gastó, se corta LIMPIO y lo pendiente queda para la corrida siguiente
+        # (antes, una corrida que se pasaba moría a mitad de un envío).
+        if time.monotonic() - inicio_corrida >= PRESUPUESTO_CORRIDA_SEG:
+            break
+
         sec = por_secuencia.get(ins.secuencia)
         if sec is None:
             sec = frappe.get_doc("Secuencia", ins.secuencia).as_dict()
@@ -1279,6 +1303,11 @@ def avanzar():
         # Delay de ráfaga: solo antes de un WhatsApp real, y solo si ya salió
         # al menos uno en esta corrida — el primer envío nunca espera.
         if paso.get("tipo") == "WhatsApp" and envios_whatsapp_en_corrida > 0:
+            # No empezar un delay que ya no cabe en el presupuesto: si se
+            # arrancara, la corrida moriría por timeout durante el sleep.
+            if (time.monotonic() - inicio_corrida
+                    > PRESUPUESTO_CORRIDA_SEG - DELAY_ENTRE_ENVIOS_SEG[1]):
+                break
             time.sleep(random.uniform(*DELAY_ENTRE_ENVIOS_SEG))
 
         try:
