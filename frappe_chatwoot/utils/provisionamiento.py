@@ -71,7 +71,6 @@ choca hacia que se perdieran los borrados de la misma corrida).
 import base64
 import json
 import os
-import re
 import shutil
 
 import frappe
@@ -507,20 +506,6 @@ def deduplicar_web_form_fields():
 def _es_sitio_agencia(sitio=None):
     """Si ESTE sitio es el de lavendi.mx (por cualquiera de sus dos hostnames)."""
     return (sitio or frappe.local.site or "") in SITIOS_AGENCIA
-
-
-def _nombre_desde_host(sitio=None):
-    """Nombre de plataforma deducido del propio host: `medicare.lavendi.mx` ->
-    "Medicare".
-
-    Es lo unico que se puede poner sin inventar cuando el sitio no declaro
-    `brand_app_name`, y es honesto: nombra al cliente, no a la agencia. Un
-    acronimo sale con mayuscula inicial nada mas (`eeplv` -> "Eeplv"); si al
-    cliente le importa, declara la clave y manda ese valor.
-    """
-    etiqueta = (sitio or frappe.local.site or "").split(".")[0]
-    palabras = [p for p in re.split(r"[-_]+", etiqueta) if p]
-    return " ".join(p.capitalize() for p in palabras)
 
 
 def branding_de_sitio():

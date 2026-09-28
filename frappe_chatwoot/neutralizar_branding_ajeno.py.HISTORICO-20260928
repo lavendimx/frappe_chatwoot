@@ -1,0 +1,169 @@
+"""OBSOLETO 2026-09-28 — se retira del arbol vivo.
+Contradecia el default de `provisionamiento.branding_de_sitio()` (marca de agencia por sitio); se conserva solo como historico."""
+
+# Copyright (c) 2026, lavendi.mx
+"""Marca de la agencia que quedó escrita en un sitio de cliente.
+
+PARA QUÉ
+    Hasta el 2026-09-26 `utils/provisionamiento.py` tenía la marca de la
+    plataforma como una constante (`"Sofía GPT by lavendi.mx"` + los PNG
+    `/files/sofia-*.png`) y la escribía en CUALQUIER sitio durante `after_migrate`.
+    Resultado medido ese día en el `tabSingles` de los 6 sitios de cliente
+    (sixgardens, estrublock, medicare, ena, eeplv, resanic): los 4 campos de
+    `Website Settings` y los 3 de `FCRM Settings`, con la marca de la agencia.
+    El cliente entra a SU CRM y lee el nombre de otra empresa en la pestaña, el
+    login y el menú.
+
+    Que la marca ahora se resuelva por sitio (`provisionamiento.branding_de_sitio`)
+    detiene la reimposición, pero NO limpia lo que ya quedó escrito: la guarda de
+    `_branding_plataforma` solo escribe cuando el sitio sigue en el default de
+    Frappe, y estos sitios ya no lo están. Eso es lo que hace este script.
+
+    Por qué no lo hace el propio `migrate`: reescribir la marca de un sitio vivo
+    sin que nadie lo mire es exactamente el reflejo que causó la fuga. La
+    corrección se mira antes de aplicarse.
+
+CÓMO
+    Dry-run por defecto: reporta, campo por campo, qué dice hoy el sitio, qué
+    diría con la marca resuelta para él, y cuáles de esos valores son de la
+    agencia. Para escribir hay que pasar `aplicar=True` explícitamente.
+
+    Los PNG de la agencia que ya estén en `public/files/` del sitio se REPORTAN,
+    nunca se borran: son archivos en disco que algo más podría referenciar
+    (una nota, una plantilla de correo, un adjunto), y borrarlos a ciegas rompería
+    esas referencias sin avisar. Quitar la referencia en la BD —que es lo que sí
+    hace este script— ya basta para que el cliente deje de ver marca ajena.
+
+Uso (solo lectura, seguro):
+    bench --site medicare.lavendi.mx execute \
+        frappe_chatwoot.neutralizar_branding_ajeno.ejecutar
+
+Uso (escribe — requiere gate humano, NO correr sin autorización):
+    bench --site medicare.lavendi.mx execute \
+        frappe_chatwoot.neutralizar_branding_ajeno.ejecutar \
+        --kwargs "{'aplicar': True}"
+"""
+
+import os
+
+import frappe
+
+from frappe_chatwoot.utils.provisionamiento import (
+    ARCHIVOS_MARCA,
+    BRANDING_AGENCIA,
+    _es_sitio_agencia,
+    branding_de_sitio,
+)
+
+# Campo de `FCRM Settings` -> campo equivalente de `Website Settings`, que es la
+# llave con la que `branding_de_sitio()` devuelve los valores. `FCRM Settings` no
+# tiene splash: el SPA solo usa nombre, logo y favicon.
+CAMPOS_WEBSITE = ["app_name", "app_logo", "splash_image", "favicon"]
+CAMPOS_FCRM = {"brand_name": "app_name", "brand_logo": "app_logo", "favicon": "favicon"}
+
+# Con qué se reconoce un valor como marca de la agencia. Aparte de los literales
+# exactos hay variantes puestas a mano que ninguna constante recoge (en
+# crm.lavendi.mx el logo del SPA es `/files/sofia-isotipo-512.png`), así que
+# también se busca por subcadena.
+MARCADORES = ("lavendi", "sofia-logo", "sofia-favicon", "sofia-isotipo")
+
+
+def _es_de_la_agencia(valor):
+    valor = (valor or "").strip()
+    if not valor:
+        return False
+    if valor in BRANDING_AGENCIA.values():
+        return True
+    return any(m in valor.lower() for m in MARCADORES)
+
+
+def _fila(campo, actual, propuesto):
+    actual = (actual or "").strip()
+    propuesto = (propuesto or "").strip()
+    return {
+        "campo": campo,
+        "actual": actual,
+        "propuesto": propuesto,
+        "es_marca_de_la_agencia": _es_de_la_agencia(actual),
+        "cambia": actual != propuesto,
+    }
+
+
+def ejecutar(aplicar=False):
+    """Reporta (y opcionalmente corrige) la marca ajena de ESTE sitio."""
+    sitio = frappe.local.site
+    reporte = {
+        "sitio": sitio,
+        "modo": "aplicar" if aplicar else "dry-run",
+        "website_settings": [],
+        "fcrm_settings": [],
+        "archivos_de_la_agencia_en_disco": [],
+    }
+
+    if _es_sitio_agencia(sitio):
+        # Aquí la marca de lavendi.mx es la correcta: es su propio sitio.
+        reporte["nota"] = "sitio de la agencia: su marca es la suya, no se toca"
+        return reporte
+
+    marca = branding_de_sitio()
+    reporte["marca_resuelta_para_este_sitio"] = marca
+    reporte["declarado_en_site_config"] = {
+        clave: frappe.conf.get(clave)
+        for clave in ("brand_app_name", "brand_logo", "brand_splash_image", "brand_favicon")
+        if frappe.conf.get(clave)
+    } or "nada: la marca de abajo es la neutra (nombre deducido del host)"
+
+    ws = frappe.get_single("Website Settings")
+    for campo in CAMPOS_WEBSITE:
+        reporte["website_settings"].append(_fila(campo, ws.get(campo), marca[campo]))
+
+    fs = frappe.get_single("FCRM Settings")
+    for campo, equivalente in CAMPOS_FCRM.items():
+        reporte["fcrm_settings"].append(_fila(campo, fs.get(campo), marca[equivalente]))
+
+    # Los PNG de la agencia que se copiaron en migrates anteriores. Solo se
+    # reportan (ver el docstring); quedan servidos en `<sitio>/files/<png>`.
+    destino = frappe.get_site_path("public", "files")
+    for nombre in ARCHIVOS_MARCA:
+        ruta = os.path.join(destino, nombre)
+        if os.path.exists(ruta):
+            reporte["archivos_de_la_agencia_en_disco"].append(
+                {"archivo": f"/files/{nombre}",
+                 "accion": "ninguna: se reporta, no se borra (puede estar referenciado)"}
+            )
+
+    pendientes = [f for f in reporte["website_settings"] + reporte["fcrm_settings"] if f["cambia"]]
+    con_marca_ajena = [
+        f for f in reporte["website_settings"] + reporte["fcrm_settings"]
+        if f["es_marca_de_la_agencia"]
+    ]
+    reporte["resumen"] = {
+        "campos_con_marca_de_la_agencia": len(con_marca_ajena),
+        "campos_que_cambiarian": len(pendientes),
+    }
+
+    if not aplicar:
+        reporte["resumen"]["nota"] = (
+            "dry-run: no se escribió nada. Para aplicar, --kwargs \"{'aplicar': True}\""
+        )
+        return reporte
+
+    if pendientes:
+        for campo in CAMPOS_WEBSITE:
+            ws.set(campo, marca[campo])
+        ws.flags.ignore_permissions = True
+        ws.save()
+
+        for campo, equivalente in CAMPOS_FCRM.items():
+            fs.set(campo, marca[equivalente])
+        fs.flags.ignore_permissions = True
+        fs.save()
+
+        frappe.db.commit()
+        # La marca se sirve cacheada (boot del SPA, `get_cached_value`): sin esto
+        # el cliente seguiría viendo la anterior hasta el próximo reinicio.
+        frappe.clear_cache()
+
+    reporte["resumen"]["aplicado"] = bool(pendientes)
+    # Sin `print`: `bench execute` ya imprime el valor de retorno como JSON.
+    return reporte
