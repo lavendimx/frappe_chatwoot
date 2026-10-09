@@ -117,6 +117,18 @@
   .cta:hover { background: var(--morado-oscuro); }
   .cta:disabled { opacity: .55; cursor: not-allowed; }
 
+  .fila-invitado { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .fila-invitado input { margin: 0; }
+  .fila-invitado .quitar-invitado {
+    flex: 0 0 auto; min-height: 44px; padding: 0 12px; border: 1px solid var(--linea);
+    border-radius: 9px; background: #fff; color: var(--tenue); font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-agregar-invitado {
+    min-height: 40px; margin-top: 2px; padding: 0 14px; border: 1px solid var(--linea);
+    border-radius: 9px; background: #fff; color: var(--morado); font: inherit; font-weight: 700;
+    cursor: pointer;
+  }
   .aviso { margin-top: 14px; padding: 12px 14px; border-radius: 9px; font-size: 14px; }
   .aviso.error { background: #fdecec; color: #a0242a; }
   .aviso.info { background: #eef1fd; color: #2f3f8f; }
@@ -182,6 +194,10 @@
 
       <label for="mensaje">¿De qué quieres que hablemos? <span class="opcional">(opcional)</span></label>
       <textarea id="mensaje"></textarea>
+
+      <label>Invitados adicionales <span class="opcional">(opcional)</span></label>
+      <div id="invitados-filas"></div>
+      <button type="button" class="btn-agregar-invitado" id="agregar-invitado">+ Agregar invitado</button>
 
       <button class="cta" type="submit" id="enviar">Confirmar videollamada</button>
       <div class="aviso error oculto" id="error"></div>
@@ -293,6 +309,47 @@
 
   pintarDias();
 
+  // Invitados adicionales (2026-10-06): además del propio participante, puede agregar a
+  // más personas a la misma videollamada — mismo campo que ya acepta el panel CRM y el bot
+  // conversacional (`invitados`, array de {nombre, email}).
+  var invitados = [];
+
+  function pintarInvitados() {
+    var cont = $('invitados-filas');
+    cont.innerHTML = '';
+    invitados.forEach(function (inv, i) {
+      var fila = document.createElement('div');
+      fila.className = 'fila-invitado';
+
+      var nombreInput = document.createElement('input');
+      nombreInput.placeholder = 'Nombre (opcional)';
+      nombreInput.value = inv.nombre;
+      nombreInput.oninput = function () { inv.nombre = nombreInput.value; };
+
+      var emailInput = document.createElement('input');
+      emailInput.type = 'email';
+      emailInput.placeholder = 'Correo';
+      emailInput.value = inv.email;
+      emailInput.oninput = function () { inv.email = emailInput.value; };
+
+      var quitar = document.createElement('button');
+      quitar.type = 'button';
+      quitar.className = 'quitar-invitado';
+      quitar.textContent = 'Quitar';
+      quitar.onclick = function () { invitados.splice(i, 1); pintarInvitados(); };
+
+      fila.appendChild(nombreInput);
+      fila.appendChild(emailInput);
+      fila.appendChild(quitar);
+      cont.appendChild(fila);
+    });
+  }
+
+  $('agregar-invitado').onclick = function () {
+    invitados.push({ nombre: '', email: '' });
+    pintarInvitados();
+  };
+
   // Atribución: se arrastra la query string de la página que trajo al visitante, igual que
   // hacía el formulario de GHL. Si no viene, el lead entra sin UTM — no se inventa.
   function param(nombre) {
@@ -314,6 +371,10 @@
     boton.disabled = true;
     boton.textContent = 'Agendando…';
 
+    var invitadosValidos = invitados
+      .filter(function (i) { return i.email.trim(); })
+      .map(function (i) { return { nombre: i.nombre.trim(), email: i.email.trim() }; });
+
     var cuerpo = {
       perfil: PERFIL,
       nombre: $('nombre').value.trim(),
@@ -323,6 +384,7 @@
       mensaje: $('mensaje').value.trim(),
       fecha: elegido.fecha,
       hora: elegido.hora,
+      invitados: JSON.stringify(invitadosValidos),
       pagina_origen: document.referrer || '',
       utm_source: param('utm_source'),
       utm_medium: param('utm_medium'),

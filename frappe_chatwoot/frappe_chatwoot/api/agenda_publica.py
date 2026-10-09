@@ -30,6 +30,8 @@ import urllib.request
 
 import frappe
 
+from .agenda import _normalizar_invitados
+
 TIMEOUT_AGENDA = 30
 
 # Tope de reservas por IP y por hora. No es antifraude —un bot con IPs rotativas lo pasa—
@@ -114,6 +116,7 @@ def reservar(
     mensaje: str = "",
     fecha: str = "",
     hora: str = "",
+    invitados: str = None,
     pagina_origen: str = "",
     utm_source: str = "",
     utm_medium: str = "",
@@ -142,6 +145,7 @@ def reservar(
             "mensaje": (mensaje or "").strip(),
             "fecha": (fecha or "").strip(),
             "hora": (hora or "").strip(),
+            "invitados": _normalizar_invitados(invitados),
         },
     )
 

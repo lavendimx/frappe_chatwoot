@@ -181,6 +181,28 @@ def buscar_contactos(query: str = "", limit: int = 10) -> list[dict]:
     )
 
 
+def _normalizar_invitados(invitados) -> list[dict]:
+    """`invitados` llega como JSON desde el front: lista de {nombre, email}. A diferencia
+    de `anfitriones` (equipo interno, solo correo), estos son invitados del lado del
+    cliente a la propia videollamada — necesitan correo válido para que Google les mande
+    la invitación; sin correo la fila no sirve de nada y se descarta en silencio en vez de
+    tronar el alta por un invitado mal capturado."""
+    if isinstance(invitados, str):
+        try:
+            invitados = json.loads(invitados)
+        except ValueError:
+            invitados = []
+    out = []
+    for inv in invitados or []:
+        if not isinstance(inv, dict):
+            continue
+        email = str(inv.get("email") or "").strip()
+        if not email:
+            continue
+        out.append({"nombre": str(inv.get("nombre") or "").strip(), "email": email})
+    return out
+
+
 @frappe.whitelist()
 def crear_cita(
     inbox_id: str,
@@ -194,6 +216,7 @@ def crear_cita(
     anfitriones: str = None,
     contacto: str = None,
     asesora: str = None,
+    invitados: str = None,
 ) -> dict:
     """Crea la cita real (Google Calendar con Meet, o nativa en Frappe según la fuente del
     inbox — Pieza F) y su registro en el CRM.
@@ -201,6 +224,9 @@ def crear_cita(
     `anfitriones` llega como JSON desde el front. Se agregan como invitados para que la
     cita caiga también en el calendario personal de quien la va a atender: el calendario
     de Sofía lo mira el equipo de vez en cuando, el propio lo miran todos los días.
+
+    `invitados`: personas adicionales del lado del cliente (no del equipo) que también
+    deben recibir la invitación — antes solo cabía un participante por cita.
 
     `asesora`: override manual del selector de la Pieza F (agenda nativa multi-asesora).
     Solo tiene efecto si el inbox declara `AGENDA_CITAS` en `agente-ia` — sin eso,
@@ -229,6 +255,7 @@ def crear_cita(
             "empresa": (empresa or "").strip(),
             "anfitriones": anfitriones,
             "contacto": contacto or "",
+            "invitados": _normalizar_invitados(invitados),
             **({"asesora": asesora} if asesora else {}),
         },
     )
@@ -258,6 +285,7 @@ def editar_cita(
     hora: str,
     duracion_minutos: int = 30,
     motivo: str = None,
+    invitados: str = None,
 ) -> dict:
     """Mueve una cita ya creada (fecha/hora/duración) y actualiza su motivo.
 
@@ -265,21 +293,44 @@ def editar_cita(
     (que tiene Google Calendar); aquí solo se valida el rol y se le pasa la
     petición. El evento se mueve con `events.patch`, no se borra y recrea, para
     que conserve su id, su Meet y sus invitados.
+
+    `invitados` es opcional: si no se manda (`None`), la lista de invitados de la cita
+    no se toca. Mandar una lista (vacía o no) la reemplaza por completo — es el mismo
+    criterio que ya usa el diálogo para "quitar un invitado": vuelve a mandar la lista
+    completa sin esa fila.
     """
     validate_role()
-    resultado = _pedir(
-        "/calendario/editar",
-        {
-            "name": name,
-            "fecha": fecha,
-            "hora": hora,
-            "duracion_minutos": frappe.utils.cint(duracion_minutos) or 30,
-            "motivo": (motivo or "").strip(),
-        },
-    )
+    payload = {
+        "name": name,
+        "fecha": fecha,
+        "hora": hora,
+        "duracion_minutos": frappe.utils.cint(duracion_minutos) or 30,
+        "motivo": (motivo or "").strip(),
+    }
+    if invitados is not None:
+        payload["invitados"] = _normalizar_invitados(invitados)
+    resultado = _pedir("/calendario/editar", payload)
     if not resultado.get("ok"):
         frappe.throw(resultado.get("mensaje") or "No se pudo editar la cita.")
     return resultado
+
+
+@frappe.whitelist()
+def invitados_de_cita(name: str) -> list[dict]:
+    """Invitados adicionales de una cita (child table `Reunion Invitado`).
+
+    Se piden aparte de la lista de citas: `frappe.client.get_list` (lo que usa
+    `createListResource` en el front) no expande tablas hijas por documento — solo el
+    diálogo de edición, al abrirse, necesita este detalle."""
+    validate_role()
+    if not name:
+        return []
+    return frappe.get_all(
+        "Reunion Invitado",
+        filters={"parent": name, "parenttype": "Reunion Agendada"},
+        fields=["nombre", "email"],
+        order_by="idx asc",
+    )
 
 
 @frappe.whitelist()
