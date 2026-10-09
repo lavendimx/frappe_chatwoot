@@ -31,8 +31,16 @@ por defecto — son leads nuevos aún sin oportunidad, que sí son candidatos.
 
 GATE FAIL-CLOSED (2026-09-27): `barrer()` solo corre en los inbox declarados en
 `site_config.json` (`autofollow_inboxes`). Si la clave falta o está vacía, no
-barre ningún inbox. Hoy ningún sitio la declara → el barrido está apagado por
-diseño; **encender autofollow es una acción explícita y aparte**.
+barre ningún inbox.
+
+ACTUALIZADO 2026-10-09 (decisión de Alejandro): dejó de ser un extra opcional —
+es capacidad BASE de Sofía y de Sofía Lite. Declarado y encendido
+(`followup_activo=1`, cadencia `3h/+1d/+1d`) en los 8 sitios activos:
+lavendi.mx (5), Grupo Gardenia (18), Six Gardens (7), EEPLV (14), Ena Barrera
+(15), Medicare (13), Resanic (16), Estrublock (8). Pendiente solo Esplendido
+(17, a medio onboarding esa fecha). Nuevo cliente: ver `RUNBOOK-ALTA-CLIENTE.md`
+Fase 5 / skill `alta-sofia-lite` paso 8 — se enciende al salir de `shadow_mode`,
+no antes.
 """
 
 import json
@@ -192,11 +200,12 @@ DELAY_ENTRE_ENVIOS_SEG = (60, 120)
 # `inbox_id` (ints) elegibles; cualquier otro inbox queda fuera, **incluso con
 # `forzar_inbox`** (el bypass manual NO se salta la allowlist).
 #
-# Valor sugerido por sitio (solo propuesta, NO se escribe aquí): el inbox real
-# del agente del cliente — p. ej. `"autofollow_inboxes": [7]` en sixgardens
-# (inbox 7) y `[18]` en grupogardenias (inbox 18). Un sitio NO se enciende solo
-# por declarar la clave: encender autofollow (`followup_activo=1`) es una acción
-# explícita y aparte.
+# Declarado 2026-10-09 en los 8 sitios activos (el inbox real del agente de
+# cada uno): lavendi.mx [5], grupogardenias [18], sixgardens [7], eeplv [14],
+# ena [15], medicare [13], resanic [16], estrublock [8]. Esplendido [17]
+# pendiente (a medio onboarding esa fecha). Un sitio NO se enciende solo por
+# declarar la clave: encender autofollow (`followup_activo=1`) sigue siendo
+# una llamada aparte (`guardar_config`) — ver docstring del módulo.
 CLAVE_INBOXES = "autofollow_inboxes"
 
 
