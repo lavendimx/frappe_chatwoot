@@ -19,6 +19,15 @@ es el primitivo equivalente para "avisar a un grupo de roles", parametrizado —
 hardcodeado a `ALLOWED_ROLES` de chatwoot.py (roles de conversaciones) dentro de
 `notify_handover`; ahora cualquier caller interno puede avisar a un conjunto de roles
 distinto (p. ej. cartera vencida = Accounts/System Manager, no todo el equipo de ventas).
+
+Canal FCM (2026-10-08): `Sofia Push Subscription` ahora tiene `channel` (`web_push` por
+default, o `fcm`). `subscribe_fcm` registra tokens nativos de Android (app Capacitor) con
+el mismo patrón de upsert por hash que `subscribe`, pero hasheando el token en vez del
+endpoint. `notify_user` bifurca por `sub.channel` — las filas viejas sin ese campo caen a
+`web_push` por default, así que el canal existente no cambia de comportamiento. `firebase_admin`
+se importa de forma perezosa DENTRO de `_send_fcm` (no al tope del módulo): mientras el
+paquete no esté instalado en el entorno vivo, el resto de `push.py` (incluido el canal
+web_push, que otros módulos importan directo) sigue funcionando sin romperse.
 """
 
 import hashlib
@@ -62,6 +71,33 @@ def subscribe(endpoint: str, p256dh: str, auth: str) -> dict:
     doc.auth = auth
     # Un mismo endpoint reasignado a otro usuario (dispositivo compartido, reinstalación)
     # debe apuntar al usuario actual, no acumular el histórico.
+    doc.user = frappe.session.user
+    doc.user_agent = (frappe.request.headers.get("User-Agent") or "")[:140] if frappe.request else ""
+    doc.last_seen = frappe.utils.now_datetime()
+    doc.channel = "web_push"
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"ok": True}
+
+
+@frappe.whitelist()
+def subscribe_fcm(token: str) -> dict:
+    """Registro de un token de FCM (push nativo Android, app Capacitor). Mismo patrón de
+    upsert que `subscribe`, pero el hash se calcula sobre el token en vez del endpoint —
+    no hay endpoint/p256dh/auth en este canal."""
+    validate_role()
+    endpoint_hash = _hash(token)
+    existing = frappe.db.exists("Sofia Push Subscription", {"endpoint_hash": endpoint_hash})
+    doc = (
+        frappe.get_doc("Sofia Push Subscription", existing)
+        if existing
+        else frappe.new_doc("Sofia Push Subscription")
+    )
+    doc.channel = "fcm"
+    doc.fcm_token = token
+    doc.endpoint_hash = endpoint_hash
+    # Mismo criterio que subscribe(): un token reasignado a otro usuario debe apuntar
+    # al usuario actual, no acumular el histórico.
     doc.user = frappe.session.user
     doc.user_agent = (frappe.request.headers.get("User-Agent") or "")[:140] if frappe.request else ""
     doc.last_seen = frappe.utils.now_datetime()
@@ -115,17 +151,31 @@ def notify_user(user: str, title: str, body: str, url: str = None, tag: str = No
     único commit real que hace falta es el de limpiar una suscripción muerta."""
     settings = _settings()
     vapid_private = settings.get_password("vapid_private_key", raise_exception=False)
-    if not settings.vapid_public_key or not vapid_private:
+    vapid_ready = bool(settings.vapid_public_key and vapid_private)
+    if not vapid_ready:
+        # No se corta la función: filas `channel=fcm` no dependen de VAPID y deben
+        # poder notificarse igual. Cada sub web_push se salta individualmente abajo.
         frappe.log_error("Sofia Push: VAPID sin configurar", "sofia_push")
-        return
 
     subs = frappe.get_all(
         "Sofia Push Subscription",
         filters={"user": user},
-        fields=["name", "endpoint", "p256dh", "auth"],
+        fields=["name", "channel", "endpoint", "p256dh", "auth", "fcm_token"],
     )
-    payload = json.dumps({"title": title, "body": body, "url": url or DEFAULT_URL, "tag": tag})
+    payload = {"title": title, "body": body, "url": url or DEFAULT_URL, "tag": tag}
+    payload_json = json.dumps(payload)
     for sub in subs:
+        # Filas creadas antes de que existiera el campo `channel` no tienen valor —
+        # deben seguir tratándose como web_push para no perder su suscripción.
+        channel = sub.channel or "web_push"
+
+        if channel == "fcm":
+            _send_fcm(sub, payload)
+            continue
+
+        if not vapid_ready:
+            continue
+
         subscription_info = {
             "endpoint": sub.endpoint,
             "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
@@ -133,7 +183,7 @@ def notify_user(user: str, title: str, body: str, url: str = None, tag: str = No
         try:
             webpush(
                 subscription_info=subscription_info,
-                data=payload,
+                data=payload_json,
                 vapid_private_key=vapid_private,
                 vapid_claims={"sub": settings.vapid_subject or "mailto:alejandro.moreno@lavendi.mx"},
             )
@@ -156,10 +206,63 @@ def notify_user(user: str, title: str, body: str, url: str = None, tag: str = No
             # NO hereda de `WebPushException` y por eso no lo cachaba el except de arriba
             # — quedaba como excepción sin manejar en cada invocación. Es un problema de
             # configuración del SITIO (la llave), no de esta suscripción puntual: seguir
-            # iterando `subs` fallaría idéntico en cada una, así que se registra UNA vez
-            # y se corta el loop en vez de ensuciar el log por cada suscriptor.
+            # iterando `subs` fallaría idéntico en cada una web_push, así que se registra
+            # UNA vez y se corta el loop en vez de ensuciar el log por cada suscriptor.
+            # Las filas `fcm` restantes en `subs` ya se procesaron arriba en su propia
+            # rama (o se procesan si vienen después — este `return` solo corta la rama
+            # web_push, que es la que de verdad depende de esta llave).
             frappe.log_error(f"Sofia Push: vapid_private_key inválida o config rota: {e}", "sofia_push")
+            vapid_ready = False
+            continue
+
+
+def _send_fcm(sub, payload: dict) -> None:
+    """Envía un push nativo Android vía Firebase Cloud Messaging. Import perezoso de
+    `firebase_admin` (no al tope del módulo): si el paquete no está instalado todavía en
+    el entorno vivo, esto falla solo, sin tumbar el import de todo `push.py` (del que
+    dependen tareas.py, recordatorios.py, facturas_vencidas.py para el canal web_push)."""
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, messaging
+    except ImportError:
+        frappe.log_error("Sofia Push: firebase_admin no instalado", "sofia_push")
+        return
+
+    settings = _settings()
+    cred_path = settings.get("fcm_service_account_path")
+    if not cred_path:
+        frappe.log_error("Sofia Push: fcm_service_account_path sin configurar", "sofia_push")
+        return
+
+    # Gunicorn corre varios workers; cada uno importa este módulo por separado, así que
+    # el guard es obligatorio — sin él, el segundo `initialize_app()` en el mismo proceso
+    # lanza ValueError("The default Firebase app already exists").
+    if not firebase_admin._apps:
+        try:
+            firebase_admin.initialize_app(credentials.Certificate(cred_path))
+        except Exception as e:
+            frappe.log_error(f"Sofia Push: no se pudo inicializar firebase_admin: {e}", "sofia_push")
             return
+
+    message = messaging.Message(
+        token=sub.fcm_token,
+        notification=messaging.Notification(title=payload["title"], body=payload["body"]),
+        data={"url": payload["url"] or DEFAULT_URL},
+    )
+    try:
+        messaging.send(message)
+    except messaging.UnregisteredError:
+        # Equivalente al 404/410 de web_push: el token ya no es válido (app desinstalada,
+        # token rotado) — borrar evita reintentar contra un token muerto indefinidamente.
+        frappe.delete_doc("Sofia Push Subscription", sub.name, ignore_permissions=True)
+        frappe.db.commit()
+    except Exception as e:
+        code = getattr(e, "code", None) or ""
+        if "UNREGISTERED" in str(code).upper() or "NOT_FOUND" in str(code).upper():
+            frappe.delete_doc("Sofia Push Subscription", sub.name, ignore_permissions=True)
+            frappe.db.commit()
+        else:
+            frappe.log_error(f"Sofia Push: fallo FCM enviando a {sub.name}: {e}", "sofia_push")
 
 
 @frappe.whitelist()

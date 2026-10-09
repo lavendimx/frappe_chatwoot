@@ -9,6 +9,7 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     "websocket-client~=1.8.0",
+    "firebase-admin~=6.5.0",
 ]
 
 [build-system]
