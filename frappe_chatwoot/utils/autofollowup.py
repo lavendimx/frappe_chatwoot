@@ -15,12 +15,23 @@ CRITERIOS DE EXCLUSIÓN (en este orden, el primero que aplica manda):
      `message_type=outgoing` que no sea del bot ni de un automatismo) — alguien
      ya está atendiendo esa conversación a mano.
   2. El contacto es CLIENTE ACTIVO: su `Contact.ghl_contact_id` resuelve a un
-     `Customer` de ERPNext (mismo vínculo que `facturacion.cartera_de_contacto`
-     — ver `vincular_customer_contacto.py`). Un cliente hablando de facturación
-     o soporte no es un prospecto que reactivar. ⚠ Este filtro es **inerte en
-     los sitios de cliente** (ninguno tiene erpnext → sin `Customer`): por eso
-     el barrido se protege con la **allowlist fail-closed** de `barrer()`, no
-     con este criterio (ver "Fase 2" en `_es_cliente`).
+     `Customer` de ERPNext CON al menos una `Sales Invoice` sometida
+     (`docstatus=1`) — no basta con que exista el `Customer` (mismo vínculo
+     que `facturacion.cartera_de_contacto`, ver `vincular_customer_contacto.py`).
+     Un cliente hablando de facturación o soporte no es un prospecto que
+     reactivar. ⚠ Este filtro es **inerte en los sitios de cliente** (ninguno
+     tiene erpnext → sin `Customer`): por eso el barrido se protege con la
+     **allowlist fail-closed** de `barrer()`, no con este criterio (ver "Fase
+     2" en `_es_cliente`).
+
+     FIX 2026-10-12 (Alejandro): desde el hook `cliente_erp.crear_customer_si_falta`
+     (25-sep, selector de cobranza) TODO `Contact` nuevo recibe un `Customer`
+     automático, incluso leads que nunca compraron. Antes de este fix,
+     `_es_cliente` solo chequeaba "existe un Customer vinculado" — eso
+     confundía "tiene registro en ERPNext" con "cliente activo que ya pagó" y
+     excluyó leads legítimos del autofollowup (caso confirmado: Paul Gastelum
+     Lopez, CRM-DEAL-2026-03923, inbox 5/Estrublock). Ahora se exige evidencia
+     real de compra: al menos una Sales Invoice sometida del Customer.
   3. Ya tiene una `Secuencia Inscripcion` en estado Activa — evita el doble
      mensaje con el motor de secuencias existente (p. ej. "4. Seguimientos —
      PVP").
@@ -68,6 +79,13 @@ def _es_cliente(contact_name: str | None) -> bool:
     diseño** en esos sitios; quien de verdad protege el barrido es la allowlist
     fail-closed de `barrer()` (`autofollow_inboxes`), no este criterio.
 
+    FIX 2026-10-12: tener `Customer` vinculado YA NO es suficiente — desde
+    `cliente_erp.crear_customer_si_falta` (25-sep) todo `Contact` nuevo recibe
+    un Customer automático, incluso leads que nunca compraron. "Cliente
+    activo" ahora exige evidencia real de compra: al menos una `Sales Invoice`
+    sometida (`docstatus=1`) de ese Customer. Sin invoice sometida, sigue
+    siendo lead elegible para autofollowup aunque tenga Customer.
+
     FASE 2 (documentada, NO implementada): el filtro semántico real —"cliente
     que paga *dentro* de un inbox permitido"— se resuelve marcando el `Contact`
     (p. ej. `tipo_relacion` / `is_billing_contact`) y exige que el cliente pueble
@@ -80,7 +98,10 @@ def _es_cliente(contact_name: str | None) -> bool:
     ghl_id = frappe.db.get_value("Contact", contact_name, "ghl_contact_id")
     if not ghl_id:
         return False
-    return bool(frappe.db.get_value("Customer", {"ghl_contact_id": ghl_id}, "name"))
+    customer = frappe.db.get_value("Customer", {"ghl_contact_id": ghl_id}, "name")
+    if not customer:
+        return False
+    return bool(frappe.db.get_value("Sales Invoice", {"customer": customer, "docstatus": 1}, "name"))
 
 
 def _deal_de(conversation_id) -> dict | None:
@@ -146,7 +167,7 @@ def clasificar(inbox_id, dias_max: int = 30) -> dict:
         if _ultimo_es_humano(last):
             motivo = "último mensaje es de un humano del equipo"
         elif _es_cliente(deal.get("contact")):
-            motivo = "es cliente activo (Customer vinculado)"
+            motivo = "es cliente activo (Customer con Sales Invoice sometida)"
         elif _tiene_secuencia_activa(deal.get("name")):
             motivo = "ya está en una Secuencia activa"
         elif deal.get("status") in ("Won", "Lost"):
