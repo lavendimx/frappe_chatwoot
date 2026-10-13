@@ -138,6 +138,22 @@ scheduler_events = {
             # a un reinicio.
             "frappe_chatwoot.utils.captacion.enviar_bienvenidas",
         ],
+        # Comentarios públicos de Facebook/Instagram — sondeo (polling), NO webhook: ver
+        # docstring de api/meta_comentarios.py para por qué (el objeto "page" de Meta solo
+        # admite una URL de webhook por app, y ya está tomada por Chatwoot/Messenger en
+        # producción). Sale en la primera línea si no hay token configurado — registrar el
+        # job no enciende nada. Clave propia, NO la de "*/5 * * * *" de arriba (esa línea ya
+        # causó una pérdida de job por sobrescritura de clave el 2026-09-25 — ver el comentario
+        # ahí, "NO volver a separar esta clave").
+        # Cada minuto (antes 10): un prospecto que comenta y recibe respuesta + DM al minuto
+        # es otra conversación que uno que contesta 10 minutos después. El costo es ~12
+        # llamadas a Graph API por corrida y por página conectada (5 publicaciones + sus
+        # comentarios, por canal) — con el volumen actual queda muy lejos del límite de Meta,
+        # pero es la variable a revisar cuando haya muchas páginas conectadas: ahí sube a
+        # 12 × páginas × 1440/día. Si algún día estorba, subir este número es el primer ajuste.
+        "* * * * *": [
+            "frappe_chatwoot.utils.meta_comentarios_sync.sincronizar",
+        ],
     },
 }
 
@@ -172,6 +188,12 @@ doc_events = {
         "on_update": [
             "frappe_chatwoot.utils.onboarding.on_deal_update",
             "frappe_chatwoot.utils.nutricion.on_deal_update",
+            # Mover el Deal a "Cotizado" desde la UI inscribe en la Secuencia de
+            # seguimiento — reemplaza la detección por PDF del agente de IA para el
+            # caso en que un vendedor humano cotiza él mismo (ver docstring de
+            # utils/seguimiento_cotizado.py). Gate explícito por site_config
+            # (`seguimiento_cotizado`): inerte en cualquier sitio que no lo declare.
+            "frappe_chatwoot.utils.seguimiento_cotizado.on_deal_update",
         ],
         # `_assign` -> `deal_owner`. Va en `on_change`, NO en `on_update`: la
         # `Assignment Rule` corre en el hook comodín `"*"` de `on_update`, y
@@ -234,6 +256,13 @@ doc_events = {
     # utils/plan.py:proteger_campos_de_plataforma.
     "FCRM Settings": {
         "validate": "frappe_chatwoot.utils.plan.proteger_campos_de_plataforma",
+    },
+    # CRM Notification (campanita, app `crm`) -> push. Los 4 tipos que ya la
+    # alimentan (Mention, Task, Assignment, WhatsApp) disparan push automático
+    # sin enganchar cada evento de negocio de origen uno por uno. Ver
+    # docstring de push.py:notify_from_crm_notification.
+    "CRM Notification": {
+        "after_insert": "frappe_chatwoot.frappe_chatwoot.api.push.notify_from_crm_notification",
     },
 }
 
