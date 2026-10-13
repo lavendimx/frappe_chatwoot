@@ -217,6 +217,8 @@ def crear_cita(
     contacto: str = None,
     asesora: str = None,
     invitados: str = None,
+    modalidad: str = None,
+    ubicacion: str = None,
 ) -> dict:
     """Crea la cita real (Google Calendar con Meet, o nativa en Frappe según la fuente del
     inbox — Pieza F) y su registro en el CRM.
@@ -257,6 +259,11 @@ def crear_cita(
             "contacto": contacto or "",
             "invitados": _normalizar_invitados(invitados),
             **({"asesora": asesora} if asesora else {}),
+            # `modalidad`/`ubicacion` (2026-10-13): cita presencial = sin liga de Meet y con
+            # dirección. Ausentes = videollamada, el comportamiento de siempre. Solo se mandan
+            # cuando llegan con contenido, para no depender del campo en sites sin migrar.
+            **({"modalidad": modalidad.strip()} if (modalidad or "").strip() else {}),
+            **({"ubicacion": ubicacion.strip()} if (ubicacion or "").strip() else {}),
         },
     )
     if not resultado.get("ok"):
@@ -286,6 +293,8 @@ def editar_cita(
     duracion_minutos: int = 30,
     motivo: str = None,
     invitados: str = None,
+    modalidad: str = None,
+    ubicacion: str = None,
 ) -> dict:
     """Mueve una cita ya creada (fecha/hora/duración) y actualiza su motivo.
 
@@ -309,6 +318,13 @@ def editar_cita(
     }
     if invitados is not None:
         payload["invitados"] = _normalizar_invitados(invitados)
+    # `modalidad`/`ubicacion` (2026-10-13): en edición se mandan SIEMPRE que lleguen (aunque
+    # sean "videollamada") — es lo que permite pasar una cita de presencial a videollamada y
+    # que se le devuelva la liga de Meet. `None` = no tocar ese dato.
+    if modalidad is not None:
+        payload["modalidad"] = (modalidad or "").strip()
+    if ubicacion is not None:
+        payload["ubicacion"] = (ubicacion or "").strip()
     resultado = _pedir("/calendario/editar", payload)
     if not resultado.get("ok"):
         frappe.throw(resultado.get("mensaje") or "No se pudo editar la cita.")
@@ -346,7 +362,7 @@ def citas_de_contacto(contacto: str) -> list[dict]:
         filters={"crm_contacto": contacto},
         fields=[
             "name", "nombre_participante", "start_datetime", "end_datetime",
-            "motivo", "meet_link", "origen",
+            "motivo", "meet_link", "origen", "modalidad", "ubicacion",
         ],
         order_by="start_datetime desc",
         limit_page_length=20,

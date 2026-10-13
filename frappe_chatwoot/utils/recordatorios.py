@@ -47,9 +47,22 @@ def _activo():
 def _mensaje(reunion):
     """Copia literal del SMS de GHL. El `{{contact.first_name}}` de allá se
     resuelve aquí con el nombre del participante, que es el dato que la cita
-    tiene a la mano."""
+    tiene a la mano.
+
+    Cita presencial (2026-10-13): el literal habla de "videollamada" + enlace de
+    Meet, que desinforma a quien va a una reunión en persona. Con
+    `modalidad == 'presencial'` se manda un texto sin liga, con la dirección si
+    la cita la trae. Cualquier otro valor (o vacío — citas viejas, agente,
+    agenda pública) es el literal de siempre, carácter por carácter.
+    """
     nombre = (reunion.nombre_participante or "").strip().split(" ")[0]
     saludo = f"Hola {nombre} 🙂" if nombre else "Hola 🙂"
+    if (reunion.modalidad or "").strip().lower() == "presencial":
+        texto = f"{saludo}, confirmando nuestra cita presencial dentro de 1 hora, correcto? 🗓️"
+        ubicacion = (reunion.ubicacion or "").strip()
+        if ubicacion:
+            texto += f"\n\nNos vemos en: {ubicacion}"
+        return texto
     return (
         f"{saludo}, confirmando nuestra videollamada / Llamada dentro de 1 hora, correcto? 🗓️\n\n"
         f"El enlace para unirte es el siguiente: \n{reunion.meet_link or ''}"
@@ -116,7 +129,8 @@ def enviar_recordatorios():
             "recordatorio_enviado_at": ["is", "not set"],
         },
         fields=["name", "nombre_participante", "meet_link", "start_datetime",
-                "inbox_id", "crm_contacto", "chatwoot_conversation_id"],
+                "inbox_id", "crm_contacto", "chatwoot_conversation_id",
+                "modalidad", "ubicacion"],
     )
 
     enviados, saltados = [], []
@@ -141,9 +155,10 @@ def enviar_recordatorios():
             try:
                 responsable = _responsable(cita)
                 if responsable:
+                    es_presencial = (cita.modalidad or "").strip().lower() == "presencial"
                     push.notify_user(
                         responsable,
-                        title="Videollamada en 1 hora",
+                        title="Reunión presencial en 1 hora" if es_presencial else "Videollamada en 1 hora",
                         body=f"Con {cita.nombre_participante or 'contacto'}",
                         url=f"/crm/conversaciones?conv={conv}",
                         tag=f"cita-{cita.name}",
