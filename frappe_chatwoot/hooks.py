@@ -31,6 +31,7 @@ scheduler_events = {
             # Mensajes programados ("enviar más tarde") — sale en la primera
             # línea si no hay nada vencido. Ver utils/programados.py.
             "frappe_chatwoot.utils.programados.enviar_programados",
+            "frappe_chatwoot.utils.meta_comentarios_sync.sincronizar",
         ],
         # Recordatorio de videollamada 1 h antes — reemplaza el workflow 5 de
         # GHL. Cada 15 min sobre una ventana asimétrica [-15, +3] min respecto
@@ -151,9 +152,10 @@ scheduler_events = {
         # comentarios, por canal) — con el volumen actual queda muy lejos del límite de Meta,
         # pero es la variable a revisar cuando haya muchas páginas conectadas: ahí sube a
         # 12 × páginas × 1440/día. Si algún día estorba, subir este número es el primer ajuste.
-        "* * * * *": [
-            "frappe_chatwoot.utils.meta_comentarios_sync.sincronizar",
-        ],
+        # meta_comentarios_sync.sincronizar se movio al bloque de arriba
+        # ("* * * * *"): dos claves identicas en el mismo dict colapsan a la
+        # ultima y dejaban sin correr programados + realtime_bridge.
+        # Fusionado el 2026-10-13.
     },
 }
 
@@ -471,6 +473,21 @@ fixtures += [
     # reemplaza completo — no aplica la trampa de las child tables.
     {"dt": "CRM Fields Layout"},
 ]
+
+# ---------------------------------------------------------------------------
+# jinja — el link de pago de la Nota de cobro
+# ---------------------------------------------------------------------------
+# El Print Format "Nota de cobro" llama esta funcion como global de Jinja
+# (`link_pago_para_imprimir(...)`). NO se usa `frappe.call(...)`: al renderizar
+# un PDF no hay request HTTP y `frappe.call` -> execute_cmd ->
+# is_valid_http_method revienta con `AttributeError: request` (verificado en
+# produccion el 2026-10-13). Se registra SOLO esta funcion (no el modulo
+# entero) para no exponer el resto de stripe_pagos.py a las plantillas.
+jinja = {
+    "methods": [
+        "frappe_chatwoot.frappe_chatwoot.api.stripe_pagos.link_pago_para_imprimir",
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # after_migrate — cierra el hueco que los fixtures no pueden cerrar
