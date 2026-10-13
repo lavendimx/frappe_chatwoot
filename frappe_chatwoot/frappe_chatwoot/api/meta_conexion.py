@@ -74,6 +74,7 @@ import frappe
 from frappe_chatwoot.utils import chatwoot_client as cw
 
 from .agenda import _config_agenda
+from .chatwoot import _inboxes_del_sitio
 
 TIMEOUT_REGISTRO_CANAL = 10  # best-effort: más corto que el de agenda.py (30s, Google+Meet).
 
@@ -107,20 +108,95 @@ def estado_mensajeria() -> dict:
     login. Antes de esto, el panel solo mostraba "ya conectadas" después de
     repetir el login de Facebook, y Instagram no tenía ningún indicador
     aunque ya estuviera conectado (pendiente señalado en el CLAUDE.md del
-    proyecto, 2026-10-09)."""
+    proyecto, 2026-10-09).
+
+    Aislamiento por sitio (bug corregido 2026-10-13): `list_inboxes()` devuelve
+    TODA la cuenta COMPARTIDA de Chatwoot, así que sin filtrar el panel de un
+    cliente mostraba como "Conectada" la página de OTRO (Estrublock veía los
+    inboxes 12/22 de lavendi.mx). Se filtra contra `_inboxes_del_sitio()` —
+    la misma fuente de verdad que Conversaciones usa para "Todos los canales"
+    (honra `canales_bandeja`; vacío = solo `default_inbox_id`)."""
     _exigir_admin()
     inboxes = cw.list_inboxes()
+    sitio = set(_inboxes_del_sitio())
     return {
         "facebook": [
             {"id": i.get("id"), "name": i.get("name")}
             for i in inboxes
             if i.get("channel_type") == "Channel::FacebookPage"
+            and frappe.utils.cint(i.get("id")) in sitio
         ],
         "instagram": [
             {"id": i.get("id"), "name": i.get("name")}
             for i in inboxes
             if i.get("channel_type") == "Channel::Instagram"
+            and frappe.utils.cint(i.get("id")) in sitio
         ],
+    }
+
+
+@frappe.whitelist()
+def desconectar_inbox(inbox_id: str) -> dict:
+    """Desconecta del panel una página/red ya conectada — de forma REVERSIBLE.
+
+    ⚠ RIESGO (por esto NO se borra el inbox de Chatwoot):
+        Borrar un inbox de Facebook/Instagram con `DELETE /inboxes/:id` hace que
+        Chatwoot des-suscriba la PÁGINA de Meta del webhook COMPARTIDO — la misma
+        página que sostiene los demás inbox/productos del sitio. Ya ocurrió una
+        vez en este proyecto al borrar un canal (cuenta demo de Meta App Review,
+        2026-10-12/13): hubo que invalidar el token ANTES del destroy justamente
+        porque borrar la bandeja tumbaba la suscripción compartida de
+        Messenger/Instagram de producción. Por eso aquí NO se llama a DELETE.
+
+    DECISIÓN — qué sí hace (la opción segura y reversible):
+        Desvincula el inbox de ESTE sitio quitándolo de `Chatwoot Settings
+        .canales_bandeja`. Es exactamente lo que `_inboxes_del_sitio()` lee para
+        armar "Todos los canales" y para el filtro de `estado_mensajeria`, así
+        que la red deja de mostrarse como "Conectada" en el panel y deja de
+        mezclarse en Conversaciones. Es 100% reversible: reconectar la página (o
+        volver a agregar el id a `canales_bandeja`) la restaura.
+        LÍMITE CONOCIDO: el inbox sigue existiendo en Chatwoot y `agente-ia`
+        puede seguir enrutándolo — esto es una desconexión de panel, no una baja
+        definitiva. Para borrar el canal de verdad hay que hacerlo a mano desde
+        el admin de Chatwoot, con el cuidado del riesgo de arriba (invalidar el
+        token de página antes).
+
+    Aislamiento: exige que el inbox pertenezca a ESTE sitio
+        (`_inboxes_del_sitio()`) antes de tocarlo — así el panel de un cliente no
+        puede desconectar el canal de otro pasando un `inbox_id` ajeno."""
+    _exigir_admin()
+    try:
+        inbox_id_int = int(str(inbox_id).strip())
+    except (TypeError, ValueError):
+        frappe.throw("inbox_id inválido.")
+
+    if inbox_id_int not in _inboxes_del_sitio():
+        frappe.throw(
+            f"El inbox {inbox_id_int} no pertenece a este sitio — no se puede desconectar desde aquí.",
+            frappe.PermissionError,
+        )
+
+    settings = frappe.get_single("Chatwoot Settings")
+    declarados = [p.strip() for p in (settings.canales_bandeja or "").split(",") if p.strip()]
+    if str(inbox_id_int) not in declarados:
+        # Solo llegó por el fallback a `default_inbox_id` (canales_bandeja vacío):
+        # es el inbox por DEFECTO del sitio (p. ej. WhatsApp). Quitarlo de aquí
+        # exigiría tocar `default_inbox_id`, no este flujo — se rechaza para no
+        # dejar el sitio sin ningún canal.
+        frappe.throw(
+            "Ese inbox es el canal por defecto del sitio (no está listado en canales_bandeja); "
+            "no se puede desconectar por esta vía."
+        )
+
+    restantes = [p for p in declarados if p != str(inbox_id_int)]
+    settings.canales_bandeja = ",".join(restantes)
+    settings.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {
+        "inbox_id": str(inbox_id_int),
+        "canales_bandeja": settings.canales_bandeja,
+        "metodo": "desvinculado_del_sitio",
     }
 
 
