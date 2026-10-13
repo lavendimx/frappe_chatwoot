@@ -1230,7 +1230,7 @@ def listar_etiquetas() -> list[dict]:
 
 
 @frappe.whitelist()
-def crear_etiqueta(nombre: str, color: str = "blue", orden=0) -> dict:
+def crear_etiqueta(nombre: str, color: str | None = "blue", orden=0) -> dict:
     """Crea una etiqueta en el catálogo del sitio. Espejo de `anclar` en estilo:
     endpoint whitelisted, rol-gateado, autoreversible. Falla si ya existe (el
     nombre es la llave) en vez de pisar la etiqueta existente."""
@@ -1254,15 +1254,31 @@ def crear_etiqueta(nombre: str, color: str = "blue", orden=0) -> dict:
 
 
 @frappe.whitelist()
-def editar_etiqueta(nombre: str, color: str = None, activo=None, orden=None) -> dict:
-    """Edita una etiqueta del catálogo: color, activo y/u orden. Los tres son
-    opcionales; solo se toca lo que llega. El nombre no se renombra (es la llave
-    y las asignaciones lo referencian por Link)."""
+def editar_etiqueta(
+    nombre: str, nuevo_nombre: str | None = None, color: str | None = None, activo=None, orden=None
+) -> dict:
+    """Edita una etiqueta del catálogo: nombre, color, activo y/u orden. Todos
+    opcionales; solo se toca lo que llega. Renombrar usa el `rename_doc` interno
+    de `frappe.model.rename_doc` (no el wrapper público `frappe.rename_doc`,
+    que no admite `ignore_permissions`) para que actualice las asignaciones
+    existentes (`Chatwoot Etiqueta Conversacion.etiqueta` es un Link a este
+    doctype) en vez de dejarlas huérfanas."""
     validate_role()
     nombre = (nombre or "").strip()
     name = frappe.db.exists("Chatwoot Etiqueta", nombre)
     if not name:
         frappe.throw(f"La etiqueta «{nombre}» no existe")
+
+    nuevo_nombre = (nuevo_nombre or "").strip()
+    if nuevo_nombre and nuevo_nombre != name:
+        if frappe.db.exists("Chatwoot Etiqueta", nuevo_nombre):
+            frappe.throw(f"La etiqueta «{nuevo_nombre}» ya existe")
+        from frappe.model.rename_doc import rename_doc as _rename_doc
+
+        _rename_doc("Chatwoot Etiqueta", name, nuevo_nombre, force=True, ignore_permissions=True)
+        frappe.db.set_value("Chatwoot Etiqueta", nuevo_nombre, "nombre", nuevo_nombre)
+        name = nuevo_nombre
+
     doc = frappe.get_doc("Chatwoot Etiqueta", name)
     if color is not None:
         _validar_color(color)
@@ -1273,6 +1289,23 @@ def editar_etiqueta(nombre: str, color: str = None, activo=None, orden=None) -> 
         doc.orden = frappe.utils.cint(orden)
     doc.save(ignore_permissions=True)
     return {"ok": True, "nombre": name}
+
+
+@frappe.whitelist()
+def eliminar_etiqueta(nombre: str) -> dict:
+    """Borra una etiqueta del catálogo y, en cascada, sus asignaciones a
+    conversaciones (`Chatwoot Etiqueta Conversacion`) — el catálogo es la
+    fuente de verdad, no tiene sentido dejar asignaciones huérfanas apuntando
+    a una etiqueta que ya no existe."""
+    validate_role()
+    nombre = (nombre or "").strip()
+    name = frappe.db.exists("Chatwoot Etiqueta", nombre)
+    if not name:
+        frappe.throw(f"La etiqueta «{nombre}» no existe")
+    for asignacion in frappe.get_all("Chatwoot Etiqueta Conversacion", filters={"etiqueta": name}):
+        frappe.delete_doc("Chatwoot Etiqueta Conversacion", asignacion.name, ignore_permissions=True)
+    frappe.delete_doc("Chatwoot Etiqueta", name, ignore_permissions=True)
+    return {"ok": True}
 
 
 @frappe.whitelist()
