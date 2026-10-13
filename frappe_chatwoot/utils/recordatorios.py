@@ -144,18 +144,22 @@ def enviar_recordatorios():
                                 ahora, update_modified=False)
             saltados.append((cita.name, "sin conversación de Chatwoot"))
             continue
+        # `detalle` de autoría (2026-10-13): la etiqueta interna que ve el equipo en el hilo
+        # ("Recordatorio …") también debe decir presencial cuando lo es — no solo el texto
+        # que recibe el cliente. La ruta de videollamada queda idéntica.
+        es_presencial = (cita.modalidad or "").strip().lower() == "presencial"
         try:
             api_cw.cw.create_message(
                 int(conv), _mensaje(cita),
                 content_attributes=autoria.marca_automatica(
-                    "recordatorio", "Recordatorio de videollamada"))
+                    "recordatorio",
+                    "Recordatorio de cita presencial" if es_presencial else "Recordatorio de videollamada"))
             frappe.db.set_value("Reunion Agendada", cita.name, "recordatorio_enviado_at",
                                 ahora, update_modified=False)
             enviados.append(cita.name)
             try:
                 responsable = _responsable(cita)
                 if responsable:
-                    es_presencial = (cita.modalidad or "").strip().lower() == "presencial"
                     push.notify_user(
                         responsable,
                         title="Reunión presencial en 1 hora" if es_presencial else "Videollamada en 1 hora",
