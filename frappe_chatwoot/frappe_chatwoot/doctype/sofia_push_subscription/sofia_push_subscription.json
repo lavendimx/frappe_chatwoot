@@ -586,7 +586,7 @@
    "fetch_from": null,
    "fetch_if_empty": 0,
    "fieldname": "fcm_token",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "hidden": 0,
    "hide_border": 0,
    "hide_days": 0,

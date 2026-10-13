@@ -28,17 +28,37 @@ endpoint. `notify_user` bifurca por `sub.channel` — las filas viejas sin ese c
 se importa de forma perezosa DENTRO de `_send_fcm` (no al tope del módulo): mientras el
 paquete no esté instalado en el entorno vivo, el resto de `push.py` (incluido el canal
 web_push, que otros módulos importan directo) sigue funcionando sin romperse.
+
+Preferencias por usuario×tipo de evento×canal (2026-10-09): hasta hoy el sistema era
+todo-o-nada — cualquier dispositivo suscrito recibía cualquier push. `Sofia Notification
+Preference` guarda, por (user, event_type), si ese tipo de aviso debe llegar por
+`web_push`/`fcm`. `notify_user()` ahora acepta `event_type` opcional: si no se pasa (callers
+viejos — tareas.py, recordatorios.py, facturas_vencidas.py, notify_handover/notify_roles),
+el comportamiento es idéntico al de siempre, sin preferencia de por medio. `get_notification_preferences`/
+`set_notification_preference` son los dos endpoints que usa el panel nuevo para leer/escribir
+esa preferencia. Además, `notify_from_crm_notification` enganchado como `after_insert` de
+`CRM Notification` (doctype stock de la app `crm`, hook en `hooks.py`) hace que los 4 tipos
+que ya alimentan la campanita del CRM (Mention, Task, Assignment, WhatsApp) disparen push
+automáticamente, sin tener que enganchar cada evento de negocio uno por uno.
 """
 
 import hashlib
 import json
 
 import frappe
+from frappe.utils import strip_html
 from pywebpush import WebPushException, webpush
 
 from frappe_chatwoot.frappe_chatwoot.api.chatwoot import ALLOWED_ROLES, validate_role
 
 DEFAULT_URL = "/crm/conversaciones"
+
+# Los 6 tipos de evento que hoy soporta el panel de preferencias. Los primeros
+# 4 coinciden 1:1 con `CRM Notification.type` (campanita del CRM, app `crm`);
+# Recordatorio y Factura son los eventos propios de frappe_chatwoot
+# (recordatorios.py, facturas_vencidas.py) que ya llamaban notify_user() antes
+# de que existiera este sistema de preferencias.
+NOTIFICATION_EVENT_TYPES = ["Mention", "Task", "Assignment", "WhatsApp", "Recordatorio", "Factura"]
 
 
 def _settings():
@@ -116,6 +136,77 @@ def unsubscribe(endpoint: str) -> dict:
     return {"ok": True}
 
 
+def _preference_enabled(user: str, event_type: str | None, channel: str) -> bool:
+    """True si `user` quiere recibir avisos de `event_type` por `channel`
+    (`web_push` o `fcm`). `event_type=None` preserva el comportamiento de
+    siempre (ver docstring del módulo) — y una fila inexistente también
+    cuenta como activado: el default es todo prendido hasta que el usuario
+    apague algo explícito desde el panel, para no romper notificaciones de
+    gente que nunca abrió esa pantalla."""
+    if not event_type:
+        return True
+    name = frappe.db.exists("Sofia Notification Preference", {"user": user, "event_type": event_type})
+    if not name:
+        return True
+    field = "enabled_web" if channel == "web_push" else "enabled_fcm"
+    return bool(frappe.db.get_value("Sofia Notification Preference", name, field))
+
+
+@frappe.whitelist()
+def get_notification_preferences() -> list[dict]:
+    """Para `frappe.session.user`: una fila por cada uno de los 6 `event_type`,
+    aunque el usuario nunca haya tocado el panel — si no existe fila real en
+    `Sofia Notification Preference`, se devuelve el default (todo activado)."""
+    validate_role()
+    user = frappe.session.user
+    existentes = {
+        row.event_type: row
+        for row in frappe.get_all(
+            "Sofia Notification Preference",
+            filters={"user": user},
+            fields=["event_type", "enabled_web", "enabled_fcm"],
+        )
+    }
+    return [
+        {
+            "event_type": event_type,
+            "enabled_web": bool(existentes[event_type].enabled_web) if event_type in existentes else True,
+            "enabled_fcm": bool(existentes[event_type].enabled_fcm) if event_type in existentes else True,
+        }
+        for event_type in NOTIFICATION_EVENT_TYPES
+    ]
+
+
+@frappe.whitelist()
+def set_notification_preference(event_type: str, channel: str, enabled: bool) -> dict:
+    """Upsert de la fila `(frappe.session.user, event_type)`, prendiendo/apagando
+    el campo del canal correspondiente (`channel="web"` -> `enabled_web`,
+    `channel="fcm"` -> `enabled_fcm`; nombres cortos hacia el frontend, no los
+    mismos que `Sofia Push Subscription.channel`, que usa `web_push`/`fcm`)."""
+    validate_role()
+    if event_type not in NOTIFICATION_EVENT_TYPES:
+        frappe.throw(f"event_type inválido: {event_type}")
+    if channel not in ("web", "fcm"):
+        frappe.throw(f"channel inválido: {channel}")
+
+    enabled = frappe.utils.cint(enabled) if not isinstance(enabled, bool) else enabled
+    field = "enabled_web" if channel == "web" else "enabled_fcm"
+    user = frappe.session.user
+
+    name = frappe.db.exists("Sofia Notification Preference", {"user": user, "event_type": event_type})
+    doc = (
+        frappe.get_doc("Sofia Notification Preference", name)
+        if name
+        else frappe.new_doc("Sofia Notification Preference")
+    )
+    doc.user = user
+    doc.event_type = event_type
+    setattr(doc, field, 1 if enabled else 0)
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"ok": True}
+
+
 def _target_users(roles: list[str] | None = None) -> set[str]:
     users = set()
     for role in (roles or ALLOWED_ROLES):
@@ -137,11 +228,17 @@ def notify_roles(roles: list[str], title: str, body: str, url: str = None, tag: 
     return notified
 
 
-def notify_user(user: str, title: str, body: str, url: str = None, tag: str = None) -> None:
+def notify_user(
+    user: str, title: str, body: str, url: str = None, tag: str = None, event_type: str = None
+) -> None:
     """Server-side, sin @frappe.whitelist(): lo llama cualquier módulo interno que ya
     sabe a qué usuario avisar (notify_handover/notify_roles para broadcast; tareas.py,
     recordatorios.py y facturas_vencidas.py para un destinatario puntual). Manda a
     TODOS los dispositivos suscritos de ese usuario.
+
+    `event_type` (2026-10-09, opcional): si se pasa, cada suscripción se filtra contra
+    `Sofia Notification Preference` antes de enviar — ver `_preference_enabled`. Los
+    callers que todavía no lo pasan (`None`) no cambian de comportamiento.
 
     Sin `frappe.db.commit()` incondicional al final (2026-09-20, corregido al
     engancharlo dentro de un doc_event de `CRM Task`): un commit a mitad de una
@@ -168,6 +265,11 @@ def notify_user(user: str, title: str, body: str, url: str = None, tag: str = No
         # Filas creadas antes de que existiera el campo `channel` no tienen valor —
         # deben seguir tratándose como web_push para no perder su suscripción.
         channel = sub.channel or "web_push"
+
+        if not _preference_enabled(user, event_type, channel):
+            # El usuario apagó este tipo de aviso en este canal — se salta, no se
+            # borra: no es una suscripción muerta, es una preferencia.
+            continue
 
         if channel == "fcm":
             _send_fcm(sub, payload)
@@ -274,3 +376,37 @@ def notify_handover(title: str, body: str, url: str = None, tag: str = None) -> 
         frappe.throw("No autorizado", frappe.PermissionError)
     notified = notify_roles(ALLOWED_ROLES, title, body, url=url, tag=tag)
     return {"ok": True, "notified": notified}
+
+
+def notify_from_crm_notification(doc, method=None) -> None:
+    """Hook `after_insert` de `CRM Notification` (doctype stock de la app `crm`, wiring
+    en `hooks.py`): engancha push a los 4 tipos que ya alimentan la campanita del CRM
+    (Mention, Task, Assignment, WhatsApp) sin tener que enganchar cada evento de negocio
+    de origen uno por uno — la campanita ya centraliza esa decisión.
+
+    Envuelto en try/except amplio a propósito: esto corre dentro del `after_insert` de
+    un doctype AJENO. Un error aquí jamás debe tumbar la creación de la notificación
+    in-app (que ya insertó exitosamente antes de llegar a este hook)."""
+    try:
+        if not doc.to_user or doc.to_user == doc.from_user:
+            # Mismo criterio que crm_notification.py: notify_user() (owner ==
+            # assigned_to -> no hay nada que avisar) y sin destinatario no hay a
+            # quién mandarle el push.
+            return
+
+        from_user_label = frappe.get_cached_value("User", doc.from_user, "full_name") or doc.from_user
+        title = f"{from_user_label} — {doc.type}"
+        body = strip_html(doc.notification_text or doc.message or "")
+
+        # Misma lógica de ruteo que crm/api/notifications.py:get_notifications():
+        # CRM Deal -> "deal", cualquier otro valor (normalmente CRM Lead) -> "lead".
+        if not doc.reference_name:
+            url = DEFAULT_URL
+        elif doc.reference_doctype == "CRM Deal":
+            url = f"/crm/deals/{doc.reference_name}"
+        else:
+            url = f"/crm/leads/{doc.reference_name}"
+
+        notify_user(doc.to_user, title, body, url=url, tag=doc.type, event_type=doc.type)
+    except Exception as e:
+        frappe.log_error(f"Sofia Push: fallo en notify_from_crm_notification: {e}", "sofia_push")
