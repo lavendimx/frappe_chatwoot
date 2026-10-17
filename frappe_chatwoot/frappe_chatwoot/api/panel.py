@@ -23,6 +23,7 @@ los últimos 10 dígitos del número — mismo criterio que usa el agente en
 """
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -43,6 +44,44 @@ MAX_NOTES = 20
 
 # Espejo de `api/chatwoot.MAX_ADJUNTOS`: mismo tope para el primer mensaje.
 MAX_ADJUNTOS = 5
+
+
+@frappe.whitelist()
+def sitios_agencia() -> list[dict]:
+    """Sitios de cliente para el switcher "Cambiar de cliente" del `UserDropdown.vue`.
+
+    Antes esto era un arreglo a mano (`SITIOS_AGENCIA`) en el propio componente — cada alta
+    de cliente requería editar el frontend y recompilar, y por eso un cliente nuevo (caso
+    Feramor, 2026-10-15) no aparecía hasta que alguien se acordaba de ese paso suelto.
+
+    Esta función lee los `site_config.json` reales del bench (mismo filesystem para todos
+    los sitios, un solo proceso de gunicorn los sirve) en vez de una lista fija: un sitio
+    nuevo aparece solo en cuanto su `site_config.json` trae `agencia_label` — sin rebuild del
+    frontend. Sitios sin ese campo (scratch, pruebas) quedan fuera a propósito, no por omisión.
+    """
+    validate_role()
+    bench_sites_dir = os.path.join(frappe.utils.get_bench_path(), "sites")
+    resultado = []
+    for nombre in sorted(os.listdir(bench_sites_dir)):
+        ruta_sitio = os.path.join(bench_sites_dir, nombre)
+        ruta_config = os.path.join(ruta_sitio, "site_config.json")
+        # `sofiav2.lavendi.mx` es symlink a `crm.lavendi.mx` (alias de dominio, no un
+        # sitio real) — sin este filtro aparece duplicado ("lavendi.mx" dos veces).
+        if os.path.islink(ruta_sitio):
+            continue
+        if not (nombre.endswith(".lavendi.mx") and os.path.isfile(ruta_config)):
+            continue
+        try:
+            with open(ruta_config) as f:
+                config = json.load(f)
+        except (OSError, ValueError):
+            continue
+        label = config.get("agencia_label")
+        if not label:
+            continue
+        url = config.get("agencia_url") or f"https://{nombre}/crm"
+        resultado.append({"label": label, "url": url})
+    return resultado
 
 
 def telefono_corto(telefono: str | None) -> str | None:
@@ -243,8 +282,8 @@ def _resolver_contacto_chatwoot(valor) -> tuple[int, str | None]:
         frappe.throw("Falta el contacto a fusionar")
 
     if not v.isdigit() and frappe.db.exists("Contact", v):
-        tel = frappe.db.get_value("Contact", v, ["mobile_no", "phone"], as_dict=True) or {}
-        cw_contact = _contacto_chatwoot(tel.get("mobile_no") or tel.get("phone"))
+        datos_tel = frappe.db.get_value("Contact", v, ["mobile_no", "phone"], as_dict=True) or {}
+        cw_contact = _contacto_chatwoot(datos_tel.get("mobile_no") or datos_tel.get("phone"))
         if not cw_contact:
             frappe.throw(f"El contacto {v} no tiene homólogo en Chatwoot (se busca por teléfono).")
         return int(cw_contact["id"]), v
@@ -258,44 +297,549 @@ def _resolver_contacto_chatwoot(valor) -> tuple[int, str | None]:
     return int(cw_contact["id"]), _contacto_por_telefono(v)
 
 
+def _resolver_contacto_chatwoot_suave(valor) -> tuple[int | None, str | None]:
+    """Igual que `_resolver_contacto_chatwoot` pero sin lanzar excepción.
+
+    Para la fusión N-a-1 (`fusionar_contactos_multiple`) un contacto sin
+    homólogo en Chatwoot no debe abortar la fusión del lado Frappe — el 79%
+    de los contactos migrados no tiene match limpio (ver cabecera del módulo),
+    y seguiría siendo un duplicado sin cerrar si cualquiera de los dos
+    careciera de contacto en Chatwoot."""
+    v = str(valor or "").strip()
+    if not v:
+        return None, None
+
+    if not v.isdigit() and frappe.db.exists("Contact", v):
+        datos_tel = frappe.db.get_value("Contact", v, ["mobile_no", "phone"], as_dict=True) or {}
+        cw_contact = _contacto_chatwoot(datos_tel.get("mobile_no") or datos_tel.get("phone"))
+        return (int(cw_contact["id"]) if cw_contact else None), v
+
+    if v.isdigit():
+        return int(v), None
+
+    cw_contact = _contacto_chatwoot(v)
+    return (int(cw_contact["id"]) if cw_contact else None), _contacto_por_telefono(v)
+
+
+def _es_mergee_inexistente(exc: Exception) -> bool:
+    """¿El error de Chatwoot es porque el `mergee` ya no existe (una fusión
+    anterior sí llegó a ocurrir pero no se alcanzó a registrar)?
+
+    `ChatwootAPIError` no trae el status_code estructurado, solo texto
+    (`chatwoot_client._post`) — se detecta por las marcas que deja un 404 en
+    el mensaje. Best-effort: si Chatwoot cambia el texto del error, el peor
+    caso es que se trate como error real en vez de idempotencia (seguro, solo
+    pide reintentar a mano)."""
+    msg = str(exc).lower()
+    return "404" in msg or "not found" in msg or "couldn't find" in msg or "no encontrado" in msg
+
+
+def _fusionar_en_chatwoot(base, mergee, lote: str | None = None) -> dict:
+    """Fusiona el PAR en Chatwoot y audita como *write-ahead log*: la fila de
+    `Chatwoot Fusion` se inserta con `estado="Pendiente"` y se hace commit
+    ANTES de llamar a Chatwoot (no después). Así, si `cw.merge_contacts` tiene
+    éxito pero el proceso muere antes de marcar `"Chatwoot OK"`, el registro
+    ya existe como evidencia y un reintento no vuelve a pegarle a un
+    `mergee_id` que Chatwoot ya vació — bug preexistente hasta este cambio,
+    donde un fallo del `insert()` posterior a un merge exitoso dejaba el par
+    sin registrar (ver `_es_mergee_inexistente`, que detecta justo ese caso en
+    el reintento).
+
+    Si alguno de los dos contactos no tiene homólogo en Chatwoot, no aborta:
+    devuelve `omitido=True` para que el llamador siga con la parte Frappe."""
+    base_id, base_contact = _resolver_contacto_chatwoot_suave(base)
+    mergee_id, mergee_contact = _resolver_contacto_chatwoot_suave(mergee)
+
+    if base_id is None or mergee_id is None:
+        return {"ok": True, "ya_fusionado": False, "omitido": True, "name": None,
+                "base_contact": base_contact, "mergee_contact": mergee_contact,
+                "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id}
+
+    if base_id == mergee_id:
+        frappe.throw("El contacto base y el duplicado son el mismo.")
+
+    existente = frappe.db.get_value(
+        "Chatwoot Fusion",
+        {"base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id},
+        ["name", "estado"], as_dict=True,
+    )
+    if existente and existente.estado in ("Chatwoot OK", "Completa"):
+        return {"ok": True, "ya_fusionado": True, "name": existente.name,
+                "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id,
+                "base_contact": base_contact, "mergee_contact": mergee_contact}
+
+    if existente:
+        nombre_fila = existente.name
+    else:
+        nombre_fila = frappe.get_doc({
+            "doctype": "Chatwoot Fusion",
+            "base_chatwoot_id": base_id,
+            "mergee_chatwoot_id": mergee_id,
+            "base_contact": base_contact,
+            "mergee_contact": mergee_contact,
+            "mergee_contact_nombre": mergee_contact,
+            "fusionado_por": frappe.session.user,
+            "fusionado_at": frappe.utils.now(),
+            "estado": "Pendiente",
+            "lote": lote,
+        }).insert(ignore_permissions=True).name
+    frappe.db.commit()
+
+    try:
+        cw.merge_contacts(base_id, mergee_id)
+    except cw.ChatwootAPIError as exc:
+        if _es_mergee_inexistente(exc):
+            frappe.db.set_value("Chatwoot Fusion", nombre_fila, "estado", "Chatwoot OK")
+            frappe.db.commit()
+        else:
+            frappe.db.set_value("Chatwoot Fusion", nombre_fila,
+                                {"estado": "Error", "error": str(exc)[:140]})
+            frappe.db.commit()
+            raise
+    else:
+        frappe.db.set_value("Chatwoot Fusion", nombre_fila, "estado", "Chatwoot OK")
+        frappe.db.commit()
+
+    return {"ok": True, "ya_fusionado": False, "name": nombre_fila,
+            "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id,
+            "base_contact": base_contact, "mergee_contact": mergee_contact}
+
+
 @frappe.whitelist()
 def fusionar_contactos(base: str, mergee: str) -> dict:
     """Fusiona dos contactos duplicados en Chatwoot (`base` absorbe a `mergee`).
 
-    Idempotente por par: si la fusión ya se registró en `Chatwoot Fusion`, no se
-    vuelve a llamar a Chatwoot (repetirla apuntaría a un `mergee` que ya no
-    existe). El registro deja la auditoría de quién fusionó, cuándo y qué dos
-    contactos de Frappe eran, porque la operación es irreversible desde Chatwoot.
+    Thin wrapper sobre `_fusionar_en_chatwoot`, extraído para reusarse en el
+    lote N-a-1 (`fusionar_contactos_multiple`, más abajo). Mismo contrato y
+    comportamiento de siempre — `FusionarContactoDialog.vue`/`Contact.vue` no
+    se tocaron.
     """
     validate_role()
     base_id, base_contact = _resolver_contacto_chatwoot(base)
     mergee_id, mergee_contact = _resolver_contacto_chatwoot(mergee)
     if base_id == mergee_id:
         frappe.throw("El contacto base y el duplicado son el mismo.")
+    return _fusionar_en_chatwoot(base, mergee)
 
-    ya = frappe.db.exists(
-        "Chatwoot Fusion",
-        {"base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id},
+
+# ---------------------------------------------------------------------------
+# Fusionar contactos — selección múltiple (N-a-1, completa: Chatwoot + Frappe)
+#
+# La fusión de arriba solo absorbe el lado Chatwoot; el `Contact` de Frappe
+# duplicado sobrevive con sus Deals/Tasks todavía apuntándole. Esto cierra esa
+# parte: fusiona también el `Contact` (vía el merge nativo de Frappe,
+# `rename_doc(merge=True)`, ya habilitado — `Contact.allow_rename=1`), con
+# selección automática de cuál sobrevive y copia de los datos que se
+# perderían al borrar el duplicado.
+# ---------------------------------------------------------------------------
+
+MAX_FUSION_LOTE = 10
+ROLES_FUSION_EJECUTAR = ("System Manager", "Sales Manager")
+
+PESOS_CAMPO_FUSION = {
+    "mobile_no": 3, "email_id": 3, "phone": 1,
+    "first_name": 1, "last_name": 1,
+    "company_name": 1, "crm_organization": 2,
+    "designation": 1, "department": 1, "image": 1,
+    "ghl_contact_id": 1, "alias_bancario": 1,
+}
+PESO_FUSION_DEAL = 10       # CRM Deal.contact
+PESO_FUSION_DEAL_SEC = 4    # fila en la child table CRM Contacts
+PESO_FUSION_LINK = 2        # fila en Contact.links (Customer, CRM Organization…)
+PESO_FUSION_USER = 6        # Contact.user ocupado (portal user colgado del contacto)
+
+# Escalares que se copian del `mergee` al `base` SOLO si el base los tiene
+# vacíos. Deliberadamente NO incluye `email_id`/`phone`/`mobile_no`: son
+# derivados (`Contact.validate()` los recalcula desde `email_ids`/`phone_nos`
+# y los vacía si esas child tables están vacías — escribirlos es un no-op
+# que `Contact.validate()` revierte solo). Tampoco incluye `google_contacts_id`
+# (es el id del MERGEE en Google People; copiarlo pisaría el contacto
+# equivocado en el próximo sync) ni `is_primary_contact` (puede disparar
+# `validate_primary_contact` sobre otros contactos, efecto fuera de alcance).
+_ESCALARES_PRECOPIABLES_CONTACT = (
+    "first_name", "last_name", "middle_name", "salutation", "gender",
+    "designation", "department", "company_name", "crm_organization",
+    "address", "image", "user", "ghl_contact_id", "alias_bancario",
+    "tipo_relacion", "cliente_slug",
+)
+_RANGO_STATUS_CONTACT = {"Replied": 2, "Open": 1, "Passive": 0}
+
+# Doctypes propios de este proyecto (frappe_chatwoot/crm) que vinculan a
+# Contact por Dynamic Link. El merge nativo de Frappe ya reasigna estos campos
+# vía `rename_dynamic_links`, pero ese mapa (`get_dynamic_link_map`) se cachea
+# 12h y el propio core lo documenta como "posiblemente desactualizado" — una
+# entrada vieja (plausible en un doctype agregado después del último rebuild
+# del caché, como `CRM Notification`) deja un huérfano silencioso. Por eso se
+# reasignan explícito, ANTES del `rename_doc`, para que además el chequeo de
+# links de `delete_doc` no tropiece con uno que el caché no conocía.
+#
+# Deliberadamente NO incluye `ToDo`: el merge nativo ya tiene manejo propio
+# para esa tabla (`update_assignments`, en `rename_doc.py`) que deduplica
+# recordatorios cuando el mismo usuario tenía asignación tanto en el base como
+# en el mergee — reasignarla a mano aquí adelantaría el `reference_name` y
+# dejaría a ese dedup sin nada que encontrar, resultando en ToDos duplicados.
+# Tampoco incluye `Communication`/`Comment`/`Communication Link`: son
+# doctypes de Frappe core, con años de uso — el caso real de caché
+# desactualizada aplica a los doctypes propios de este proyecto, no a esos.
+_REFERENCIAS_DINAMICAS_FUSION = {
+    "FCRM Note": ("reference_doctype", "reference_docname"),
+    "CRM Task": ("reference_doctype", "reference_docname"),
+    "CRM Call Log": ("reference_doctype", "reference_docname"),
+    "CRM Notification": ("reference_doctype", "reference_name"),
+}
+
+
+def _validar_rol_fusion():
+    """La fusión N-a-1 reasigna Deals/Tasks de varios contactos a la vez y es
+    irreversible del lado Chatwoot — el gate de `validate_role()` (hasta
+    `Sales User`) alcanza para la vista previa, pero no para ejecutarla."""
+    validate_role()
+    user_roles = frappe.get_roles(frappe.session.user)
+    if not any(r in user_roles for r in ROLES_FUSION_EJECUTAR) and frappe.session.user != "Administrator":
+        frappe.throw(
+            "Fusionar varios contactos requiere rol Sales Manager o System Manager.",
+            frappe.PermissionError,
+        )
+
+
+def _parse_contactos(contactos, *, exigir_existencia: bool = True) -> list[str]:
+    """El frontend manda la selección como JSON (mismo patrón que `_parse_adjuntos`,
+    arriba, para listas que vienen de la UI). Deduplica conservando el orden
+    y exige que el tamaño del lote sea sano.
+
+    `exigir_existencia=False` (usado por `fusionar_contactos_multiple`, para
+    que el reintento de un lote parcialmente fusionado sea idempotente): un
+    `mergee` de un intento anterior ya no existe como `Contact` — eso es
+    justo la señal de "ya_fusionado", no un error. La vista previa sí exige
+    que todos existan: ahí no hay reintento, solo una selección fresca de la
+    lista."""
+    if isinstance(contactos, str):
+        try:
+            contactos = json.loads(contactos or "[]")
+        except ValueError:
+            frappe.throw("Lista de contactos inválida")
+    nombres = list(dict.fromkeys(str(c).strip() for c in (contactos or []) if str(c).strip()))
+    if len(nombres) < 2:
+        frappe.throw("Selecciona al menos 2 contactos para fusionar")
+    if len(nombres) > MAX_FUSION_LOTE:
+        frappe.throw(f"Máximo {MAX_FUSION_LOTE} contactos por fusión")
+    if exigir_existencia:
+        faltantes = [n for n in nombres if not frappe.db.exists("Contact", n)]
+        if faltantes:
+            frappe.throw(f"No existen estos contactos: {', '.join(faltantes)}")
+    return nombres
+
+
+def _puntuar_contacto(name: str) -> dict:
+    """Score de completitud/relevancia para decidir cuál de varios duplicados
+    sobrevive. Pondera mucho más fuerte lo que SÍ se perdería si el contacto
+    se borra sin pre-copiarlo primero (oportunidades vinculadas, vínculos
+    dinámicos, usuario de portal) que la mera cantidad de campos llenos."""
+    campos = list(PESOS_CAMPO_FUSION) + ["full_name", "creation"]
+    c = frappe.db.get_value("Contact", name, campos, as_dict=True) or {}
+
+    deals = frappe.db.count("CRM Deal", {"contact": name})
+    deals_sec = frappe.db.count("CRM Contacts", {"contact": name})
+    links = frappe.db.count("Dynamic Link", {"parenttype": "Contact", "parent": name})
+
+    score = sum(peso for campo, peso in PESOS_CAMPO_FUSION.items() if c.get(campo))
+    score += deals * PESO_FUSION_DEAL + deals_sec * PESO_FUSION_DEAL_SEC + links * PESO_FUSION_LINK
+    score += PESO_FUSION_USER if c.get("user") else 0
+
+    return {
+        "name": name,
+        "full_name": c.get("full_name"),
+        "mobile_no": c.get("mobile_no"),
+        "email_id": c.get("email_id"),
+        "company_name": c.get("company_name"),
+        "crm_organization": c.get("crm_organization"),
+        "creation": c.get("creation"),
+        "deals": deals,
+        "deals_sec": deals_sec,
+        "links": links,
+        "score": score,
+    }
+
+
+def _razon_de(c: dict) -> str:
+    """Texto humano para el diálogo ("3 oportunidades, correo y organización,
+    creado 2026-03-11") — explica POR QUÉ se recomendó ese contacto como base,
+    en vez de mostrar un número de score sin contexto."""
+    total_deals = c["deals"] + c["deals_sec"]
+    partes = []
+    if total_deals:
+        partes.append(f"{total_deals} oportunidad{'es' if total_deals != 1 else ''}")
+    if c.get("email_id"):
+        partes.append("correo")
+    if c.get("crm_organization") or c.get("company_name"):
+        partes.append("organización")
+    detalle = ", ".join(partes) if partes else "sin datos adicionales"
+    fecha = frappe.utils.formatdate(c.get("creation")) if c.get("creation") else "—"
+    return f"{detalle}, creado {fecha}"
+
+
+def _elegir_contacto_base(contactos: list[str]) -> dict:
+    """Heurística determinista: a igual score gana el más antiguo
+    (`creation` asc); a igual antigüedad gana el `name` menor. Así la vista
+    previa y la ejecución nunca pueden elegir distinto para el mismo
+    conjunto, sin importar el orden en que llegó la selección."""
+    candidatos = [_puntuar_contacto(n) for n in contactos]
+    candidatos.sort(key=lambda c: (-c["score"], c["creation"] or "", c["name"]))
+    for c in candidatos:
+        c["razon"] = _razon_de(c)
+    base = candidatos[0]
+    return {"base": base["name"], "candidatos": candidatos, "razon": base["razon"]}
+
+
+def _precopiar_datos(base_doc, mergee_name: str) -> list[str]:
+    """Antes de que `rename_doc(merge=True)` borre el `mergee`, copia al
+    `base` lo que se perdería con él. Child tables por valor normalizado
+    (teléfono por últimos 10 dígitos — mismo criterio que `tel.corto()` ya
+    usa el proyecto para no duplicar a Anabel Osuna otra vez; email en
+    minúsculas), nunca duplicando lo que el base ya tiene. `unsubscribed` se
+    combina con OR: si cualquiera de los dos estaba dado de baja, el base
+    queda dado de baja — nunca resuscribir a alguien sin querer. Un solo
+    `base_doc.save()` lo deja todo persistido antes del merge.
+    """
+    mergee = frappe.get_doc("Contact", mergee_name)
+    copiado = []
+
+    for campo in _ESCALARES_PRECOPIABLES_CONTACT:
+        if not base_doc.get(campo) and mergee.get(campo):
+            base_doc.set(campo, mergee.get(campo))
+            copiado.append(campo)
+
+    cortos_existentes = {tel.corto(p.phone) for p in base_doc.phone_nos if tel.corto(p.phone)}
+    for fila in mergee.phone_nos:
+        corto = tel.corto(fila.phone)
+        if corto and corto not in cortos_existentes:
+            base_doc.append("phone_nos", {
+                "phone": fila.phone, "is_primary_phone": 0, "is_primary_mobile_no": 0,
+            })
+            cortos_existentes.add(corto)
+            copiado.append(f"teléfono {fila.phone}")
+
+    correos_existentes = {e.email_id.strip().lower() for e in base_doc.email_ids if e.email_id}
+    for fila in mergee.email_ids:
+        correo = (fila.email_id or "").strip().lower()
+        if correo and correo not in correos_existentes:
+            base_doc.append("email_ids", {"email_id": fila.email_id, "is_primary": 0})
+            correos_existentes.add(correo)
+            copiado.append(f"correo {fila.email_id}")
+
+    links_existentes = {(l.link_doctype, l.link_name) for l in base_doc.links}
+    for fila in mergee.links:
+        clave = (fila.link_doctype, fila.link_name)
+        if clave not in links_existentes:
+            base_doc.append("links", {"link_doctype": fila.link_doctype, "link_name": fila.link_name})
+            links_existentes.add(clave)
+            copiado.append(f"vínculo {fila.link_doctype} {fila.link_name}")
+
+    if mergee.get("unsubscribed") and not base_doc.get("unsubscribed"):
+        base_doc.unsubscribed = 1
+        copiado.append("unsubscribed")
+
+    if _RANGO_STATUS_CONTACT.get(mergee.get("status"), -1) > _RANGO_STATUS_CONTACT.get(base_doc.get("status"), -1):
+        base_doc.status = mergee.get("status")
+        copiado.append("status")
+
+    return copiado
+
+
+def _reasignar_referencias_dinamicas(mergee_name: str, base_name: str) -> dict:
+    """Barrido explícito de Dynamic Link antes del `rename_doc` — ver el
+    comentario de `_REFERENCIAS_DINAMICAS_FUSION` arriba sobre por qué estos
+    doctypes y no otros. Update directo por SQL (sin disparar hooks propios de
+    esos doctypes, igual que hace el core)."""
+    conteos = {}
+    for doctype, (campo_tipo, campo_nombre) in _REFERENCIAS_DINAMICAS_FUSION.items():
+        n = frappe.db.count(doctype, {campo_tipo: "Contact", campo_nombre: mergee_name})
+        if n:
+            frappe.db.set_value(
+                doctype, {campo_tipo: "Contact", campo_nombre: mergee_name},
+                campo_nombre, base_name, update_modified=False,
+            )
+            conteos[doctype] = n
+    return conteos
+
+
+def _reasignar_secuencia_inscripcion(mergee_name: str, base_name: str) -> list[str]:
+    """`Secuencia Inscripcion.contacto` es un Link normal (no Dynamic Link) —
+    si no se reasigna queda huérfano igual que cualquier otro, así que SIEMPRE
+    se reasigna. Pero si el `base` YA estaba inscrito en la misma secuencia,
+    queda una inscripción duplicada que NO se borra sola aquí: cada fila tiene
+    estado propio (`paso_actual`, `proximo_en`) y adivinar cuál conservar
+    podría saltarse o repetir un envío — se reporta para revisión manual en
+    vez de autocorregirse."""
+    filas_mergee = frappe.get_all(
+        "Secuencia Inscripcion", filters={"contacto": mergee_name},
+        fields=["name", "secuencia"],
     )
-    if ya:
-        return {"ok": True, "ya_fusionado": True, "name": ya,
-                "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id}
+    if not filas_mergee:
+        return []
+    secuencias_base = set(frappe.get_all(
+        "Secuencia Inscripcion", filters={"contacto": base_name},
+        pluck="secuencia",
+    ))
+    duplicadas = []
+    for fila in filas_mergee:
+        frappe.db.set_value("Secuencia Inscripcion", fila.name, "contacto", base_name,
+                            update_modified=False)
+        if fila.secuencia in secuencias_base:
+            duplicadas.append(f"{fila.name} (secuencia {fila.secuencia})")
+    return duplicadas
 
-    cw.merge_contacts(base_id, mergee_id)
 
-    doc = frappe.get_doc({
-        "doctype": "Chatwoot Fusion",
-        "base_chatwoot_id": base_id,
-        "mergee_chatwoot_id": mergee_id,
-        "base_contact": base_contact,
-        "mergee_contact": mergee_contact,
-        "fusionado_por": frappe.session.user,
-        "fusionado_at": frappe.utils.now(),
-    }).insert(ignore_permissions=True)
-    frappe.db.commit()
-    return {"ok": True, "ya_fusionado": False, "name": doc.name,
-            "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id,
-            "base_contact": base_contact, "mergee_contact": mergee_contact}
+def _dedupe_crm_contacts(base_name: str) -> int:
+    """Tras el merge, un `CRM Deal` que ya tenía tanto al base como al mergee
+    en su child table `CRM Contacts` queda con dos filas iguales (el
+    `update_link_field_values` del core reasigna el Link de las dos a la
+    vez). Sin estado propio — son solo un espejo de datos del Contact
+    (`fetch_from`) —, así que borrar el sobrante es seguro, a diferencia de
+    `Secuencia Inscripcion`."""
+    filas = frappe.get_all(
+        "CRM Contacts", filters={"contact": base_name},
+        fields=["name", "parent", "idx", "is_primary"],
+    )
+    por_deal: dict[str, list] = {}
+    for f in filas:
+        por_deal.setdefault(f.parent, []).append(f)
+    borradas = 0
+    for grupo in por_deal.values():
+        if len(grupo) < 2:
+            continue
+        grupo.sort(key=lambda f: (0 if f.is_primary else 1, f.idx))
+        for sobrante in grupo[1:]:
+            frappe.db.delete("CRM Contacts", {"name": sobrante.name})
+            borradas += 1
+    return borradas
+
+
+@frappe.whitelist()
+def previsualizar_fusion_contactos(contactos) -> dict:
+    """Vista previa, sin efectos secundarios: ninguna escritura y ninguna
+    llamada de red salvo 1 búsqueda del homólogo de Chatwoot del contacto
+    base (no de los N-1 mergees — abrir el diálogo no puede disparar hasta 10
+    llamadas HTTP). El frontend manda este mismo `base` de vuelta al ejecutar
+    (`fusionar_contactos_multiple`), así que preview y ejecución nunca pueden
+    discrepar por una carrera de datos entre los dos clics."""
+    validate_role()
+    nombres = _parse_contactos(contactos)
+    eleccion = _elegir_contacto_base(nombres)
+
+    base_chatwoot_id, _ = _resolver_contacto_chatwoot_suave(eleccion["base"])
+    advertencias = []
+    if base_chatwoot_id is None:
+        advertencias.append(
+            "El contacto base no tiene homólogo en Chatwoot — la fusión solo afectará el CRM."
+        )
+    sin_chatwoot = [
+        c["name"] for c in eleccion["candidatos"]
+        if c["name"] != eleccion["base"] and not c.get("mobile_no") and not c.get("email_id")
+    ]
+    if sin_chatwoot:
+        advertencias.append(
+            f"{len(sin_chatwoot)} contacto(s) sin teléfono/correo — probablemente sin "
+            "homólogo en Chatwoot; de todos modos se fusionarán en el CRM."
+        )
+
+    return {
+        "base": eleccion["base"],
+        "razon": eleccion["razon"],
+        "candidatos": eleccion["candidatos"],
+        "base_chatwoot_id": base_chatwoot_id,
+        "advertencias": advertencias,
+    }
+
+
+@frappe.whitelist()
+def fusionar_contactos_multiple(contactos, base: str) -> dict:
+    """Fusiona N contactos duplicados en uno (`base`, Chatwoot + Frappe).
+
+    `base` debe ser exactamente el que devolvió `previsualizar_fusion_contactos`
+    (o el que el usuario eligió a mano en el diálogo, anulando la
+    recomendación) — nunca se recalcula a ciegas aquí, para que preview y
+    ejecución no puedan discrepar. Cada `mergee` es su propia unidad
+    transaccional: un fallo no aborta el resto del lote, y un `mergee` que ya
+    no existe como `Contact` (fusionado en un intento anterior) se reporta
+    como `ya_fusionado` sin volver a tocar Chatwoot."""
+    _validar_rol_fusion()
+    nombres = _parse_contactos(contactos, exigir_existencia=False)
+    base = (base or "").strip()
+    if base not in nombres:
+        frappe.throw("El contacto base debe estar dentro de los seleccionados")
+    if not frappe.db.exists("Contact", base):
+        frappe.throw(f"El contacto base {base} no existe")
+
+    # Recalculado solo sobre los que SIGUEN existiendo: un mergee ya fusionado
+    # en un intento anterior no debe competir por la recomendación.
+    existentes = [n for n in nombres if n == base or frappe.db.exists("Contact", n)]
+    recalculo = _elegir_contacto_base(existentes)
+    base_recomendado_cambio = recalculo["base"] != base
+
+    lote = frappe.generate_hash(length=10)
+    resultados = []
+    for mergee in [n for n in nombres if n != base]:
+        resultado = {"mergee": mergee}
+        if not frappe.db.exists("Contact", mergee):
+            resultado.update(ok=True, ya_fusionado=True)
+            resultados.append(resultado)
+            continue
+
+        fusion_cw = None
+        try:
+            fusion_cw = _fusionar_en_chatwoot(base, mergee, lote=lote)
+
+            base_doc = frappe.get_doc("Contact", base)
+            datos_copiados = _precopiar_datos(base_doc, mergee)
+            base_doc.flags.fusion_en_curso = True
+            base_doc.flags.ignore_mandatory = True
+            base_doc.save(ignore_permissions=True)
+
+            _reasignar_referencias_dinamicas(mergee, base)
+            duplicadas_secuencia = _reasignar_secuencia_inscripcion(mergee, base)
+
+            from frappe.model.rename_doc import rename_doc as _rename_doc
+
+            _rename_doc("Contact", mergee, base, merge=True, ignore_permissions=True,
+                        show_alert=False, rebuild_search=False)
+
+            borradas = _dedupe_crm_contacts(base)
+
+            if fusion_cw.get("name"):
+                frappe.db.set_value("Chatwoot Fusion", fusion_cw["name"], {
+                    "estado": "Completa",
+                    "contact_frappe_merged": 1,
+                    "lote": lote,
+                    "datos_copiados": "; ".join(datos_copiados) or None,
+                })
+            frappe.db.commit()
+
+            resultado.update(
+                ok=True, ya_fusionado=False,
+                chatwoot_omitido=bool(fusion_cw.get("omitido")),
+                datos_copiados=datos_copiados,
+                crm_contacts_deduplicadas=borradas,
+                secuencias_duplicadas=duplicadas_secuencia,
+            )
+        except Exception as exc:
+            frappe.db.rollback()
+            frappe.log_error(title="fusionar_contactos_multiple", message=frappe.get_traceback())
+            if fusion_cw and fusion_cw.get("name"):
+                frappe.db.set_value("Chatwoot Fusion", fusion_cw["name"],
+                                    {"estado": "Error", "error": str(exc)[:140]})
+                frappe.db.commit()
+            resultado.update(ok=False, ya_fusionado=False, error=str(exc))
+        resultados.append(resultado)
+
+    ok = sum(1 for r in resultados if r.get("ok"))
+    fallidos = sum(1 for r in resultados if not r.get("ok"))
+    return {
+        "base": base, "lote": lote, "resultados": resultados,
+        "ok": ok, "fallidos": fallidos,
+        "base_recomendado_cambio": base_recomendado_cambio,
+        "base_recomendado": recalculo["base"],
+    }
 
 
 # ---------------------------------------------------------------------------

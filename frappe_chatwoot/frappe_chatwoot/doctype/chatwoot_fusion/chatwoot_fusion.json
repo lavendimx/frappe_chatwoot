@@ -12,8 +12,14 @@
   "mergee_chatwoot_id",
   "base_contact",
   "mergee_contact",
+  "mergee_contact_nombre",
   "fusionado_por",
-  "fusionado_at"
+  "fusionado_at",
+  "estado",
+  "contact_frappe_merged",
+  "lote",
+  "error",
+  "datos_copiados"
  ],
  "fields": [
   {
@@ -43,6 +49,13 @@
    "options": "Contact"
   },
   {
+   "description": "Nombre del Contact fusionado, guardado aparte porque el merge nativo de Frappe (rename_doc) reescribe el Link `mergee_contact` hacia el base — sin este campo se pierde el rastro de qué se borró.",
+   "fieldname": "mergee_contact_nombre",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nombre del duplicado (snapshot)"
+  },
+  {
    "fieldname": "fusionado_por",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -54,6 +67,37 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "Fusionado en"
+  },
+  {
+   "default": "Pendiente",
+   "fieldname": "estado",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Estado",
+   "options": "Pendiente\nChatwoot OK\nCompleta\nError"
+  },
+  {
+   "default": "0",
+   "fieldname": "contact_frappe_merged",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Contact de Frappe fusionado"
+  },
+  {
+   "description": "Agrupa las filas de una misma operación de fusión N-a-1.",
+   "fieldname": "lote",
+   "fieldtype": "Data",
+   "label": "Lote"
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error"
+  },
+  {
+   "fieldname": "datos_copiados",
+   "fieldtype": "Small Text",
+   "label": "Datos copiados del duplicado al base"
   }
  ],
  "index_web_pages_for_search": 1,
