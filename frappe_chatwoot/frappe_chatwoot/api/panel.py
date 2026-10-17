@@ -447,6 +447,9 @@ PESO_FUSION_DEAL = 10       # CRM Deal.contact
 PESO_FUSION_DEAL_SEC = 4    # fila en la child table CRM Contacts
 PESO_FUSION_LINK = 2        # fila en Contact.links (Customer, CRM Organization…)
 PESO_FUSION_USER = 6        # Contact.user ocupado (portal user colgado del contacto)
+PESO_FUSION_CONVERSACION_RECIENTE = 10  # mismo peso que un Deal: quién tiene la
+# conversación de Chatwoot más reciente es tan buena señal de "cuál es el
+# contacto vivo" como tener una oportunidad abierta — Alejandro, 2026-10-17.
 
 # Escalares que se copian del `mergee` al `base` SOLO si el base los tiene
 # vacíos. Deliberadamente NO incluye `email_id`/`phone`/`mobile_no`: son
@@ -530,6 +533,25 @@ def _parse_contactos(contactos, *, exigir_existencia: bool = True) -> list[str]:
     return nombres
 
 
+def _ultima_actividad_chatwoot(name: str) -> int:
+    """Epoch de la conversación de Chatwoot más reciente del contacto, o 0 si
+    no tiene homólogo, no tiene conversaciones, o la API falla — best-effort,
+    nunca bloquea la elección de base por una caída de Chatwoot (mismo
+    criterio de degradar suave que `_fusionar_en_chatwoot`/`_resolver_contacto_
+    chatwoot_suave`, dado que el 79% de los contactos migrados no tiene match
+    limpio)."""
+    try:
+        chatwoot_id, _ = _resolver_contacto_chatwoot_suave(name)
+        if chatwoot_id is None:
+            return 0
+        conversaciones = cw.get_conversations_for_contact(chatwoot_id)
+    except cw.ChatwootAPIError:
+        return 0
+    if not conversaciones:
+        return 0
+    return max((c.get("last_activity_at") or 0) for c in conversaciones)
+
+
 def _puntuar_contacto(name: str) -> dict:
     """Score de completitud/relevancia para decidir cuál de varios duplicados
     sobrevive. Pondera mucho más fuerte lo que SÍ se perdería si el contacto
@@ -557,14 +579,16 @@ def _puntuar_contacto(name: str) -> dict:
         "deals": deals,
         "deals_sec": deals_sec,
         "links": links,
+        "ultima_conversacion": _ultima_actividad_chatwoot(name),
         "score": score,
     }
 
 
 def _razon_de(c: dict) -> str:
     """Texto humano para el diálogo ("3 oportunidades, correo y organización,
-    creado 2026-03-11") — explica POR QUÉ se recomendó ese contacto como base,
-    en vez de mostrar un número de score sin contexto."""
+    conversación más reciente, creado 2026-03-11") — explica POR QUÉ se
+    recomendó ese contacto como base, en vez de mostrar un número de score sin
+    contexto."""
     total_deals = c["deals"] + c["deals_sec"]
     partes = []
     if total_deals:
@@ -573,6 +597,8 @@ def _razon_de(c: dict) -> str:
         partes.append("correo")
     if c.get("crm_organization") or c.get("company_name"):
         partes.append("organización")
+    if c.get("_conversacion_mas_reciente"):
+        partes.append("conversación más reciente")
     detalle = ", ".join(partes) if partes else "sin datos adicionales"
     fecha = frappe.utils.formatdate(c.get("creation")) if c.get("creation") else "—"
     return f"{detalle}, creado {fecha}"
@@ -582,8 +608,26 @@ def _elegir_contacto_base(contactos: list[str]) -> dict:
     """Heurística determinista: a igual score gana el más antiguo
     (`creation` asc); a igual antigüedad gana el `name` menor. Así la vista
     previa y la ejecución nunca pueden elegir distinto para el mismo
-    conjunto, sin importar el orden en que llegó la selección."""
+    conjunto, sin importar el orden en que llegó la selección.
+
+    Quién tiene la conversación de Chatwoot más reciente (`ultima_conversacion`,
+    resuelta en `_puntuar_contacto`) suma el mismo peso que una oportunidad
+    abierta (`PESO_FUSION_CONVERSACION_RECIENTE`) — es una señal adicional de
+    "cuál es el contacto vivo", no un criterio que por sí solo decida; se
+    combina con el resto del score en vez de reemplazarlo. Esto SÍ dispara
+    hasta 2 llamadas HTTP a Chatwoot por candidato (resolver id + listar
+    conversaciones) — hasta `MAX_FUSION_LOTE` candidatos en la vista previa.
+    Antes de este cambio la vista previa no tocaba red más que para el
+    homólogo del `base`; se acepta la latencia porque es una acción manual y
+    poco frecuente, y porque sin ella no hay forma de saber quién tiene la
+    conversación más reciente."""
     candidatos = [_puntuar_contacto(n) for n in contactos]
+    max_actividad = max((c["ultima_conversacion"] for c in candidatos), default=0)
+    if max_actividad:
+        for c in candidatos:
+            if c["ultima_conversacion"] == max_actividad:
+                c["score"] += PESO_FUSION_CONVERSACION_RECIENTE
+                c["_conversacion_mas_reciente"] = True
     candidatos.sort(key=lambda c: (-c["score"], c["creation"] or "", c["name"]))
     for c in candidatos:
         c["razon"] = _razon_de(c)
@@ -717,10 +761,13 @@ def _dedupe_crm_contacts(base_name: str) -> int:
 
 @frappe.whitelist()
 def previsualizar_fusion_contactos(contactos) -> dict:
-    """Vista previa, sin efectos secundarios: ninguna escritura y ninguna
-    llamada de red salvo 1 búsqueda del homólogo de Chatwoot del contacto
-    base (no de los N-1 mergees — abrir el diálogo no puede disparar hasta 10
-    llamadas HTTP). El frontend manda este mismo `base` de vuelta al ejecutar
+    """Vista previa, sin efectos secundarios: ninguna escritura, pero SÍ hace
+    red — `_elegir_contacto_base` (vía `_puntuar_contacto`) resuelve la
+    conversación de Chatwoot más reciente de cada candidato, hasta 2 llamadas
+    HTTP por candidato y hasta `MAX_FUSION_LOTE` candidatos (ver su docstring).
+    Antes de agregar ese criterio esto era 1 sola llamada (el homólogo del
+    `base`); se acepta la latencia adicional porque es una acción manual y
+    poco frecuente. El frontend manda este mismo `base` de vuelta al ejecutar
     (`fusionar_contactos_multiple`), así que preview y ejecución nunca pueden
     discrepar por una carrera de datos entre los dos clics."""
     validate_role()
