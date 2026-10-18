@@ -32,6 +32,7 @@ import frappe
 
 from frappe_chatwoot.utils import autoria
 from frappe_chatwoot.utils import chatwoot_client as cw
+from frappe_chatwoot.utils import cliente_erp
 from frappe_chatwoot.utils import telefono as tel
 from frappe_chatwoot.utils.chatwoot_contactos import _contacto_chatwoot
 
@@ -356,7 +357,14 @@ def _fusionar_en_chatwoot(base, mergee, lote: str | None = None) -> dict:
                 "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id}
 
     if base_id == mergee_id:
-        frappe.throw("El contacto base y el duplicado son el mismo.")
+        # Ambos Contact de Frappe resuelven al MISMO contacto de Chatwoot
+        # (match suave por telefono normalizado, ej. con/sin el 1 de LADA
+        # celular mexicano) -- no hay nada que fusionar en Chatwoot, el
+        # duplicado es puramente de este lado. Antes esto lanzaba y
+        # abortaba toda la fusion (incluida la parte Frappe/Customer).
+        return {"ok": True, "ya_fusionado": True, "omitido": True, "name": None,
+                "base_contact": base_contact, "mergee_contact": mergee_contact,
+                "base_chatwoot_id": base_id, "mergee_chatwoot_id": mergee_id}
 
     existente = frappe.db.get_value(
         "Chatwoot Fusion",
@@ -759,6 +767,232 @@ def _dedupe_crm_contacts(base_name: str) -> int:
     return borradas
 
 
+# ---------------------------------------------------------------------------
+# Consolidación del `Customer` de ERPNext tras la fusión
+#
+# Por qué existe (bug real, caso "Eleazer Moreno", 2026-10-17): la fusión
+# consolidaba `Contact` + Chatwoot y nunca miraba `tabCustomer`. Cada fusión
+# dejaba DOS clientes vivos de la misma persona en el selector de Cobranza:
+#
+#   1. El del contacto absorbido: el merge nativo borra el `Contact`, no su
+#      `Customer` — ese queda activo y sin dueño.
+#   2. Uno NUEVO del contacto base: `_precopiar_datos` guarda el base a mitad de
+#      la fusión, ese `on_update` dispara `cliente_erp.crear_customer_si_falta`
+#      y, como el vínculo del base todavía no estaba, le crea otro. En el caso
+#      medido nació a las 08:35:22, UN SEGUNDO antes de que se borraran los
+#      contactos absorbidos.
+#
+# El arreglo son dos piezas y las dos hacen falta; cualquiera sola deja el bug:
+#
+#   a) `frappe.flags.in_fusion_contactos` apaga el alta automática mientras dura
+#      la fusión (`cliente_erp.crear_customer_si_falta` lo respeta). Mata la
+#      causa 2.
+#   b) `consolidar_customers_de_fusion` corre AL FINAL, cuando ya solo vive el
+#      contacto base, y deja exactamente un `Customer` activo. Mata la causa 1 y
+#      limpia los duplicados que las fusiones anteriores ya dejaron regados.
+#
+# Nada se borra: el perdedor queda `disabled=1` (desaparece del selector y se
+# revierte con un UPDATE) y sus facturas pasan al sobreviviente. Borrar un
+# Customer o una factura es acción reservada — ni esta función ni ninguna otra
+# de este módulo lo hacen.
+# ---------------------------------------------------------------------------
+
+# Doctypes que guardan una COPIA del cliente fuera de la factura. Reasignar solo
+# `Sales Invoice.customer` dejaría "Cuentas por cobrar" mostrando saldo a nombre
+# del Customer deshabilitado: ERPNext arma el estado de cuenta desde el ledger,
+# no desde el campo de la factura. Solo se mueve el `party` — mismo humano, otro
+# nombre de registro; importes, asientos y docstatus no se tocan (gate del
+# contrato: de una factura emitida solo se reasigna el cliente).
+_LEDGERS_PARTY_FUSION = ("GL Entry", "Payment Ledger Entry")
+
+
+def _snapshot_customers_de_contacto(contact: str) -> dict:
+    """Foto de los `Customer` que cuelgan de un contacto. Para los absorbidos
+    hay que tomarla ANTES de fusionar.
+
+    Motivo: `rename_doc(..., merge=True)` borra el `Contact`, y con él se va su
+    `ghl_contact_id` — en los Customers migrados de GHL que todavía no tienen
+    `Dynamic Link` ese campo es el ÚNICO rastro de a quién pertenecían. Después
+    de la fusión ese Customer sería indistinguible de un huérfano cualquiera y
+    se quedaría activo en el selector para siempre.
+
+    Se miran las tres rutas porque el vínculo está a medio migrar (ver cabecera
+    de `utils/cliente_erp.py`): `Dynamic Link` (el nuevo), el inverso nativo
+    `Customer.customer_primary_contact`, y `ghl_contact_id` (el viejo, mientras
+    el patch de backfill no termine). `has_column` protege a los sitios donde el
+    custom field de GHL nunca existió.
+    """
+    foto = {"contact": contact, "ghl_contact_id": None, "customers": []}
+    if not contact or not cliente_erp._erpnext_instalado():
+        return foto
+
+    encontrados = list(frappe.get_all(
+        "Dynamic Link",
+        filters={"parenttype": "Contact", "parent": contact, "link_doctype": "Customer"},
+        pluck="link_name",
+    ))
+    encontrados += frappe.get_all(
+        "Customer", filters={"customer_primary_contact": contact}, pluck="name"
+    )
+
+    if frappe.db.has_column("Contact", "ghl_contact_id") and frappe.db.has_column(
+        "Customer", "ghl_contact_id"
+    ):
+        ghl_id = (frappe.db.get_value("Contact", contact, "ghl_contact_id") or "").strip()
+        if ghl_id:
+            foto["ghl_contact_id"] = ghl_id
+            encontrados += frappe.get_all(
+                "Customer", filters={"ghl_contact_id": ghl_id}, pluck="name"
+            )
+
+    foto["customers"] = list(dict.fromkeys(c for c in encontrados if c))
+    return foto
+
+
+def _reasignar_facturacion_customer(viejo: str, nuevo: str, nombre_nuevo: str) -> dict:
+    """Mueve todo lo facturable de `viejo` a `nuevo`. No borra nada.
+
+    `update_modified=False` a propósito: esto es una corrección de plomería, no
+    una edición de negocio — no debe hacer parecer que alguien tocó esa factura
+    hoy, ni invalidar un documento que otro usuario tenga abierto.
+
+    `Auto Repeat` NO se reasigna: su cliente no vive en él, vive en la factura
+    molde (`reference_document`) — ver `facturacion._resumen_recurrente`. Al
+    mover la factura, la recurrente se va con ella. Solo se cuentan las que
+    quedaron afectadas, para que el reporte diga la verdad de lo que se movió.
+    """
+    movido = {"facturas": 0, "recurrentes": 0, "pagos": 0, "asientos": 0}
+
+    facturas = frappe.get_all("Sales Invoice", filters={"customer": viejo}, pluck="name")
+    for factura in facturas:
+        frappe.db.set_value(
+            "Sales Invoice", factura,
+            {"customer": nuevo, "customer_name": nombre_nuevo},
+            update_modified=False,
+        )
+    movido["facturas"] = len(facturas)
+    if facturas:
+        movido["recurrentes"] = frappe.db.count("Auto Repeat", {
+            "reference_doctype": "Sales Invoice",
+            "reference_document": ("in", facturas),
+        })
+
+    pagos = frappe.get_all(
+        "Payment Entry", filters={"party_type": "Customer", "party": viejo}, pluck="name"
+    )
+    for pago in pagos:
+        frappe.db.set_value(
+            "Payment Entry", pago,
+            {"party": nuevo, "party_name": nombre_nuevo},
+            update_modified=False,
+        )
+    movido["pagos"] = len(pagos)
+
+    for doctype in _LEDGERS_PARTY_FUSION:
+        if not frappe.db.exists("DocType", doctype):
+            continue
+        filtros = {"party_type": "Customer", "party": viejo}
+        n = frappe.db.count(doctype, filtros)
+        if n:
+            frappe.db.set_value(doctype, filtros, "party", nuevo, update_modified=False)
+            movido["asientos"] += n
+
+    return movido
+
+
+def consolidar_customers_de_fusion(
+    contacto_base: str,
+    contactos_absorbidos: list[str],
+    snapshots: dict[str, dict] | None = None,
+) -> dict:
+    """Deja UN solo `Customer` activo para el contacto que sobrevivió la fusión.
+
+    Se llama al final de `fusionar_contactos_multiple`, cuando `rename_doc` ya
+    borró los absorbidos y la reasignación de referencias terminó. `snapshots`
+    es `{contacto_absorbido: _snapshot_customers_de_contacto(...)}` tomado ANTES
+    de la fusión — sin él los Customers de los absorbidos que solo estaban
+    unidos por `ghl_contact_id` ya no se pueden recuperar (ver el docstring de
+    la foto).
+
+    Quién sobrevive (decisión #5 del contrato): el que TIENE facturas, no el más
+    reciente. A más facturas gana el que más tenga, y a empate el más antiguo
+    por `creation`. El criterio es el riesgo contable: mover una factura emitida
+    de cliente es más delicado que deshabilitar un registro vacío, así que se
+    mueve lo mínimo posible.
+
+    Solo compiten los Customers ACTIVOS. Uno ya deshabilitado se quedó así
+    porque alguien lo decidió; reactivarlo por sobrevivir a una fusión sería
+    deshacer esa decisión a espaldas del usuario, y `customer_de_contacto` de
+    todos modos lo ignora. Si no queda ninguno activo (el guard de la fusión
+    impidió el alta automática), se crea uno aquí — es lo que habría pasado sin
+    el guard, solo que en el momento correcto.
+
+    Los `Dynamic Link` de los deshabilitados se dejan colgando del contacto
+    base a propósito: son la trazabilidad de que aquella factura vieja era de
+    esta misma persona. No estorban porque `customer_de_contacto` prefiere
+    siempre el activo.
+    """
+    resultado = {
+        "ok": True, "aplicable": True, "sobreviviente": None,
+        "deshabilitados": [], "facturas_reasignadas": 0,
+        "recurrentes_afectadas": 0, "pagos_reasignados": 0,
+        "asientos_reasignados": 0, "candidatos": [], "creado": False,
+    }
+
+    if not cliente_erp._erpnext_instalado():
+        # 9 de los 12 sitios son `sofia_plan: lite`: CRM sin facturación, sin
+        # doctype `Customer`. No-op limpio, no es un error.
+        resultado.update(aplicable=False, motivo="El sitio no tiene ERPNext")
+        return resultado
+
+    candidatos = list(_snapshot_customers_de_contacto(contacto_base)["customers"])
+    for absorbido in contactos_absorbidos or []:
+        foto = (snapshots or {}).get(absorbido) or _snapshot_customers_de_contacto(absorbido)
+        candidatos += foto.get("customers") or []
+    candidatos = list(dict.fromkeys(candidatos))
+    resultado["candidatos"] = candidatos
+
+    vivos = []
+    for nombre in candidatos:
+        fila = frappe.db.get_value(
+            "Customer", nombre, ["name", "customer_name", "creation", "disabled"], as_dict=True
+        )
+        # Puede no existir: la foto se tomó antes y alguien pudo borrarlo en el
+        # Desk mientras tanto. No es motivo para tumbar nada.
+        if not fila or fila.disabled:
+            continue
+        fila["facturas"] = frappe.db.count("Sales Invoice", {"customer": nombre})
+        vivos.append(fila)
+
+    if not vivos:
+        doc = frappe.get_doc("Contact", contacto_base)
+        creado = cliente_erp._asegurar_customer(doc)
+        if creado:
+            resultado.update(sobreviviente=creado.name, creado=True)
+        return resultado
+
+    vivos.sort(key=lambda c: (-c["facturas"], c["creation"], c["name"]))
+    sobreviviente = vivos[0]
+    resultado["sobreviviente"] = sobreviviente["name"]
+
+    for perdedor in vivos[1:]:
+        movido = _reasignar_facturacion_customer(
+            perdedor["name"], sobreviviente["name"], sobreviviente["customer_name"]
+        )
+        frappe.db.set_value("Customer", perdedor["name"], "disabled", 1, update_modified=False)
+        resultado["deshabilitados"].append(perdedor["name"])
+        resultado["facturas_reasignadas"] += movido["facturas"]
+        resultado["recurrentes_afectadas"] += movido["recurrentes"]
+        resultado["pagos_reasignados"] += movido["pagos"]
+        resultado["asientos_reasignados"] += movido["asientos"]
+
+    # Al final y no antes: si el vínculo se escribiera primero, un fallo a mitad
+    # de la reasignación dejaría al contacto apuntando a un cliente al que
+    # todavía le faltan facturas por recibir.
+    cliente_erp.vincular(contacto_base, sobreviviente["name"])
+    return resultado
+
+
 @frappe.whitelist()
 def previsualizar_fusion_contactos(contactos) -> dict:
     """Vista previa, sin efectos secundarios: ninguna escritura, pero SÍ hace
@@ -809,7 +1043,12 @@ def fusionar_contactos_multiple(contactos, base: str) -> dict:
     ejecución no puedan discrepar. Cada `mergee` es su propia unidad
     transaccional: un fallo no aborta el resto del lote, y un `mergee` que ya
     no existe como `Contact` (fusionado en un intento anterior) se reporta
-    como `ya_fusionado` sin volver a tocar Chatwoot."""
+    como `ya_fusionado` sin volver a tocar Chatwoot.
+
+    Toda la operación corre con `frappe.flags.in_fusion_contactos` encendido y
+    termina llamando a `consolidar_customers_de_fusion`: el lado ERPNext de la
+    fusión. Ver el bloque de comentarios de esa función — sin esas dos piezas,
+    fusionar dos contactos que ya facturan deja dos clientes en Cobranza."""
     _validar_rol_fusion()
     nombres = _parse_contactos(contactos, exigir_existencia=False)
     base = (base or "").strip()
@@ -826,58 +1065,107 @@ def fusionar_contactos_multiple(contactos, base: str) -> dict:
 
     lote = frappe.generate_hash(length=10)
     resultados = []
-    for mergee in [n for n in nombres if n != base]:
-        resultado = {"mergee": mergee}
-        if not frappe.db.exists("Contact", mergee):
-            resultado.update(ok=True, ya_fusionado=True)
-            resultados.append(resultado)
-            continue
+    # Fotos de los Customer de cada absorbido ANTES de tocarlo: `rename_doc`
+    # borra el Contact y con él el `ghl_contact_id` que todavía une a algunos
+    # Customers migrados con su dueño. Después ya no hay de dónde recuperarlo.
+    snapshots: dict[str, dict] = {}
+    customers_consolidados = None
 
-        fusion_cw = None
-        try:
-            fusion_cw = _fusionar_en_chatwoot(base, mergee, lote=lote)
+    # El guard que apaga el alta automática de Customer durante toda la fusión
+    # (`cliente_erp.crear_customer_si_falta`). En `finally` porque una excepción
+    # que escape de aquí dejaría el alta apagada para el resto del request —
+    # cualquier Contact que se guardara después se quedaría sin su Customer.
+    # Se restaura el valor previo en vez de borrarlo, por si alguna vez esto se
+    # llama anidado desde otra fusión. El `bool()` no sobra: `frappe.flags` es
+    # un `_dict` y devuelve `None` para una clave ausente — el default del
+    # `getattr` nunca se usa, así que sin él se restauraría `None` en vez de
+    # `False`.
+    flag_previo = bool(getattr(frappe.flags, "in_fusion_contactos", False))
+    frappe.flags.in_fusion_contactos = True
+    try:
+        for mergee in [n for n in nombres if n != base]:
+            resultado = {"mergee": mergee}
+            if not frappe.db.exists("Contact", mergee):
+                resultado.update(ok=True, ya_fusionado=True)
+                resultados.append(resultado)
+                continue
 
-            base_doc = frappe.get_doc("Contact", base)
-            datos_copiados = _precopiar_datos(base_doc, mergee)
-            base_doc.flags.fusion_en_curso = True
-            base_doc.flags.ignore_mandatory = True
-            base_doc.save(ignore_permissions=True)
+            fusion_cw = None
+            try:
+                snapshots[mergee] = _snapshot_customers_de_contacto(mergee)
+                fusion_cw = _fusionar_en_chatwoot(base, mergee, lote=lote)
 
-            _reasignar_referencias_dinamicas(mergee, base)
-            duplicadas_secuencia = _reasignar_secuencia_inscripcion(mergee, base)
+                base_doc = frappe.get_doc("Contact", base)
+                datos_copiados = _precopiar_datos(base_doc, mergee)
+                base_doc.flags.fusion_en_curso = True
+                base_doc.flags.ignore_mandatory = True
+                base_doc.save(ignore_permissions=True)
 
-            from frappe.model.rename_doc import rename_doc as _rename_doc
+                _reasignar_referencias_dinamicas(mergee, base)
+                duplicadas_secuencia = _reasignar_secuencia_inscripcion(mergee, base)
 
-            _rename_doc("Contact", mergee, base, merge=True, ignore_permissions=True,
-                        show_alert=False, rebuild_search=False)
+                from frappe.model.rename_doc import rename_doc as _rename_doc
 
-            borradas = _dedupe_crm_contacts(base)
+                _rename_doc("Contact", mergee, base, merge=True, ignore_permissions=True,
+                            show_alert=False, rebuild_search=False)
 
-            if fusion_cw.get("name"):
-                frappe.db.set_value("Chatwoot Fusion", fusion_cw["name"], {
-                    "estado": "Completa",
-                    "contact_frappe_merged": 1,
-                    "lote": lote,
-                    "datos_copiados": "; ".join(datos_copiados) or None,
-                })
-            frappe.db.commit()
+                borradas = _dedupe_crm_contacts(base)
 
-            resultado.update(
-                ok=True, ya_fusionado=False,
-                chatwoot_omitido=bool(fusion_cw.get("omitido")),
-                datos_copiados=datos_copiados,
-                crm_contacts_deduplicadas=borradas,
-                secuencias_duplicadas=duplicadas_secuencia,
-            )
-        except Exception as exc:
-            frappe.db.rollback()
-            frappe.log_error(title="fusionar_contactos_multiple", message=frappe.get_traceback())
-            if fusion_cw and fusion_cw.get("name"):
-                frappe.db.set_value("Chatwoot Fusion", fusion_cw["name"],
-                                    {"estado": "Error", "error": str(exc)[:140]})
+                if fusion_cw.get("name"):
+                    frappe.db.set_value("Chatwoot Fusion", fusion_cw["name"], {
+                        "estado": "Completa",
+                        "contact_frappe_merged": 1,
+                        "lote": lote,
+                        "datos_copiados": "; ".join(datos_copiados) or None,
+                    })
                 frappe.db.commit()
-            resultado.update(ok=False, ya_fusionado=False, error=str(exc))
-        resultados.append(resultado)
+
+                resultado.update(
+                    ok=True, ya_fusionado=False,
+                    chatwoot_omitido=bool(fusion_cw.get("omitido")),
+                    datos_copiados=datos_copiados,
+                    crm_contacts_deduplicadas=borradas,
+                    secuencias_duplicadas=duplicadas_secuencia,
+                )
+            except Exception as exc:
+                frappe.db.rollback()
+                frappe.log_error(title="fusionar_contactos_multiple", message=frappe.get_traceback())
+                if fusion_cw and fusion_cw.get("name"):
+                    frappe.db.set_value("Chatwoot Fusion", fusion_cw["name"],
+                                        {"estado": "Error", "error": str(exc)[:140]})
+                    frappe.db.commit()
+                resultado.update(ok=False, ya_fusionado=False, error=str(exc))
+            resultados.append(resultado)
+
+        # El lado ERPNext, al final y una sola vez: ya solo vive el contacto
+        # base y sus referencias están reasignadas.
+        #
+        # Solo entran los absorbidos que de verdad desaparecieron. Si un mergee
+        # falló a medio camino su `Contact` sigue vivo y su Customer le sigue
+        # perteneciendo — absorberlo aquí dejaría a un contacto existente sin
+        # cliente facturable. Los `ya_fusionado` (reintento de un lote a medias)
+        # SÍ entran aunque no tengan foto: su Customer duplicado es justo lo que
+        # quedó pendiente de limpiar del intento anterior.
+        #
+        # Un fallo aquí NO invalida la fusión: los contactos ya están unidos y
+        # eso no se deshace. Se reporta como `customers.ok = False` para que
+        # quede visible (y arreglable a mano) en vez de silencioso.
+        absorbidos = [n for n in nombres if n != base and not frappe.db.exists("Contact", n)]
+        if absorbidos:
+            try:
+                customers_consolidados = consolidar_customers_de_fusion(
+                    base, absorbidos, snapshots=snapshots
+                )
+                frappe.db.commit()
+            except Exception as exc:
+                frappe.db.rollback()
+                frappe.log_error(
+                    title="fusionar_contactos_multiple: consolidar_customers",
+                    message=frappe.get_traceback(),
+                )
+                customers_consolidados = {"ok": False, "error": str(exc)}
+    finally:
+        frappe.flags.in_fusion_contactos = flag_previo
 
     ok = sum(1 for r in resultados if r.get("ok"))
     fallidos = sum(1 for r in resultados if not r.get("ok"))
@@ -886,6 +1174,7 @@ def fusionar_contactos_multiple(contactos, base: str) -> dict:
         "ok": ok, "fallidos": fallidos,
         "base_recomendado_cambio": base_recomendado_cambio,
         "base_recomendado": recalculo["base"],
+        "customers": customers_consolidados,
     }
 
 

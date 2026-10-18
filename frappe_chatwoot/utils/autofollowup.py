@@ -14,48 +14,39 @@ CRITERIOS DE EXCLUSIÓN (en este orden, el primero que aplica manda):
      `content_attributes` de `utils/autoria.py`, o heredado sin marca con
      `message_type=outgoing` que no sea del bot ni de un automatismo) — alguien
      ya está atendiendo esa conversación a mano.
-  2. El contacto es CLIENTE ACTIVO: su `Contact.ghl_contact_id` resuelve a un
-     `Customer` de ERPNext CON al menos una `Sales Invoice` sometida
-     (`docstatus=1`) — no basta con que exista el `Customer` (mismo vínculo
-     que `facturacion.cartera_de_contacto`, ver `vincular_customer_contacto.py`).
-     Un cliente hablando de facturación o soporte no es un prospecto que
-     reactivar. ⚠ Este filtro es **inerte en los sitios de cliente** (ninguno
-     tiene erpnext → sin `Customer`): por eso el barrido se protege con la
-     **allowlist fail-closed** de `barrer()`, no con este criterio (ver "Fase
-     2" en `_es_cliente`).
-
-     FIX 2026-10-12 (Alejandro): desde el hook `cliente_erp.crear_customer_si_falta`
-     (25-sep, selector de cobranza) TODO `Contact` nuevo recibe un `Customer`
-     automático, incluso leads que nunca compraron. Antes de este fix,
-     `_es_cliente` solo chequeaba "existe un Customer vinculado" — eso
-     confundía "tiene registro en ERPNext" con "cliente activo que ya pagó" y
-     excluyó leads legítimos del autofollowup (caso confirmado: Paul Gastelum
-     Lopez, CRM-DEAL-2026-03923, inbox 5/Estrublock). Ahora se exige evidencia
-     real de compra: al menos una Sales Invoice sometida del Customer.
+  2. El contacto es CLIENTE ACTIVO: el contacto resuelve a un `Customer` de
+     ERPNext por el `Dynamic Link` nativo (mismo vínculo que
+     `facturacion.cartera_de_contacto` — ver `utils/cliente_erp.py`). Un
+     cliente hablando de facturación
+     o soporte no es un prospecto que reactivar. ⚠ Este filtro es **inerte en
+     los sitios de cliente** (ninguno tiene erpnext → sin `Customer`): por eso
+     el barrido se protege con la **allowlist fail-closed** de `barrer()`, no
+     con este criterio (ver "Fase 2" en `_es_cliente`).
   3. Ya tiene una `Secuencia Inscripcion` en estado Activa — evita el doble
      mensaje con el motor de secuencias existente (p. ej. "4. Seguimientos —
      PVP").
   4. El deal ya está cerrado (`Won`/`Lost`).
+  5. Ya se le confirmó al prospecto, en esta misma conversación, que NO hay
+     disponibilidad para la fecha que preguntó (`_tiene_disponibilidad_cerrada`,
+     2026-10-15) — insistir después de eso es falsa esperanza, no reactivación.
+     Caso real que lo originó: Lizeth Guadarrama (conv 1076, deal
+     `CRM-DEAL-2026-00045`, Six Gardens) recibiendo follow-ups sobre una fecha
+     que el staff ya cerró por evento sin cupo. Distinto del criterio 2: ahí
+     se excluye a quien ya ES cliente; aquí se excluye a quien ya recibió un
+     NO para lo que pidió, sea o no cliente.
 
 Sin deal ligado a la conversación (`chatwoot_conversation_id`), NO se excluye
 por defecto — son leads nuevos aún sin oportunidad, que sí son candidatos.
 
 GATE FAIL-CLOSED (2026-09-27): `barrer()` solo corre en los inbox declarados en
 `site_config.json` (`autofollow_inboxes`). Si la clave falta o está vacía, no
-barre ningún inbox.
-
-ACTUALIZADO 2026-10-09 (decisión de Alejandro): dejó de ser un extra opcional —
-es capacidad BASE de Sofía y de Sofía Lite. Declarado y encendido
-(`followup_activo=1`, cadencia `3h/+1d/+1d`) en los 8 sitios activos:
-lavendi.mx (5), Grupo Gardenia (18), Six Gardens (7), EEPLV (14), Ena Barrera
-(15), Medicare (13), Resanic (16), Estrublock (8). Pendiente solo Esplendido
-(17, a medio onboarding esa fecha). Nuevo cliente: ver `RUNBOOK-ALTA-CLIENTE.md`
-Fase 5 / skill `alta-sofia-lite` paso 8 — se enciende al salir de `shadow_mode`,
-no antes.
+barre ningún inbox. Hoy ningún sitio la declara → el barrido está apagado por
+diseño; **encender autofollow es una acción explícita y aparte**.
 """
 
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -63,45 +54,268 @@ from datetime import datetime, timedelta, timezone
 
 import frappe
 
-from . import autoria, chatwoot_client
+from . import autoria, chatwoot_client, telefono
+
+# ---------------------------------------------------------------------------
+# Fallback Fase 2 de `_es_cliente` para sitios SIN erpnext (2026-10-12)
+# ---------------------------------------------------------------------------
+#
+# Origen: bug reportado por Six Gardens el 2026-10-12 — el guard `erpnext`
+# deja el criterio "ya es cliente" inerte en todo sitio sin ERPNext (hoy,
+# todos los de cliente), así que el autofollowup le mandaba mensajes a quien
+# ya había reservado/pagado. Instalar ERPNext fue evaluado y descartado por
+# Alejandro: el hook que crea `Customer` ahí es automático sobre cualquier
+# `Contact` nuevo/editado, sin relación a venta ni pago — empeoraría el bug,
+# no lo resolvería.
+#
+# Señal elegida: la etiqueta nativa "Cliente" que el staff del cliente ya
+# puede poner a mano en su app de WhatsApp Business (viaja por Baileys, sin
+# API oficial de Meta). Los webhooks de labels de Evolution siguen apagados a
+# propósito (encenderlos es trabajo aparte, con su propio gate de
+# producción) — y no hacen falta: Evolution persiste la asociación en su tabla
+# `Chat` siempre que `DATABASE_SAVE_DATA_CHATS=true`; el webhook solo reenvía
+# el evento a terceros (verificado en `whatsapp.baileys.service.ts`, el
+# handler `LABELS_ASSOCIATION` escribe con `addLabel` antes de reenviar).
+#
+# Se lee por la **API REST** de Evolution, no por su Postgres (decidido el
+# 2026-10-13 tras verificarlo): ese Postgres escucha solo en `127.0.0.1`, así
+# que consultarlo desde el contenedor de Frappe exigía abrirlo y reiniciar un
+# cluster compartido con otro cliente. El puerto REST ya es alcanzable desde
+# aquí por la misma red docker que Chatwoot usa para hablarle (regla UFW
+# preexistente) — cero cambios de infraestructura, cero reinicios.
+#
+# Genérico por diseño, no hardcodeado a Six Gardens: todas las claves son de
+# `site_config.json`, mismo patrón plano que `CLAVE_INBOXES` de abajo. Un
+# sitio sin estas claves cae a `False` sin intentar ninguna conexión — fail-
+# closed, igual que el guard `erpnext` que reemplaza.
+CLAVE_EVO_BASE_URL = "evolution_api_base_url"
+CLAVE_EVO_API_KEY = "evolution_api_key"
+CLAVE_EVO_INSTANCE = "evolution_api_instance"
+CLAVE_EVO_ETIQUETA = "evolution_api_etiqueta_cliente"  # default "Cliente"
+
+TIMEOUT_EVO = 8
+
+
+def _config_evolution() -> dict | None:
+    """Datos de acceso a la API REST de la instancia Evolution del sitio, leídos
+    de `site_config.json`. Devuelve `None` si falta cualquiera, para que
+    `_es_cliente_por_etiqueta` corte antes de tocar la red (sin consultas
+    muertas, mismo criterio que el guard `erpnext`)."""
+    conf = frappe.conf
+    base = conf.get(CLAVE_EVO_BASE_URL)
+    api_key = conf.get(CLAVE_EVO_API_KEY)
+    instancia = conf.get(CLAVE_EVO_INSTANCE)
+    if not (base and api_key and instancia):
+        return None
+    return {
+        "base": str(base).rstrip("/"),
+        "api_key": api_key,
+        "instancia": instancia,
+        "etiqueta": conf.get(CLAVE_EVO_ETIQUETA) or "Cliente",
+    }
+
+
+def _pedir_evolution(cfg: dict, ruta: str, cuerpo: dict | None = None):
+    """GET (o POST si `cuerpo`) a la API de Evolution. Devuelve el JSON, o
+    `None` ante cualquier error — el llamador siempre trata `None` como "no
+    sé", que aquí equivale a "no es cliente" (fail-closed)."""
+    url = f"{cfg['base']}{ruta}"
+    datos = json.dumps(cuerpo).encode() if cuerpo is not None else None
+    req = urllib.request.Request(
+        url,
+        data=datos,
+        method="POST" if datos is not None else "GET",
+        headers={"apikey": cfg["api_key"], "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_EVO) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        frappe.log_error(
+            title="autofollowup._pedir_evolution",
+            message=f"{ruta}: {e}",
+        )
+        return None
+
+
+def _cache_barrido(clave: str, calcular):
+    """Memo por job/request (`frappe.local`): el barrido consulta decenas de
+    contactos y el catálogo de chats y etiquetas es el mismo para todos. No se
+    usa `frappe.cache()` a propósito — una etiqueta recién puesta debe verse en
+    el barrido siguiente (cada 20 min), no cuando expire un TTL."""
+    almacen = getattr(frappe.local, "_autofollowup_evo_cache", None)
+    if almacen is None:
+        almacen = {}
+        frappe.local._autofollowup_evo_cache = almacen
+    if clave not in almacen:
+        almacen[clave] = calcular()
+    return almacen[clave]
+
+
+def _label_ids_cliente(cfg: dict) -> set:
+    """Ids de etiqueta cuyo nombre es la etiqueta configurada.
+
+    Comparación laxa (sin espacios sobrantes, sin distinguir mayúsculas): el
+    staff la teclea a mano en su teléfono y Evolution guarda el nombre tal
+    cual, con espacio final incluido — en SIGARDENS existe literal
+    `"SEGUIMIENTO "`.
+
+    ⚠ El id viene en `id`, NO en `labelId` (verificado contra la API real el
+    2026-10-13: `/label/findLabels` serializa la columna `labelId` del Postgres
+    como `id`). Se aceptan ambos por si otra versión de Evolution lo expone
+    con el nombre de la columna."""
+
+    def calcular():
+        etiquetas = _pedir_evolution(cfg, f"/label/findLabels/{cfg['instancia']}")
+        if not isinstance(etiquetas, list):
+            return set()
+        buscada = str(cfg["etiqueta"]).strip().casefold()
+        encontradas = set()
+        for e in etiquetas:
+            if not isinstance(e, dict):
+                continue
+            ident = e.get("id") or e.get("labelId")
+            if ident and str(e.get("name") or "").strip().casefold() == buscada:
+                encontradas.add(str(ident))
+        return encontradas
+
+    # La etiqueta va en la clave del memo: si no, un cambio de
+    # `evolution_api_etiqueta_cliente` dentro del mismo job devolvería el
+    # resultado de la etiqueta anterior.
+    return _cache_barrido(f"label_ids::{cfg['etiqueta']}", calcular)
+
+
+def _remote_jid_de_telefono(cfg: dict, corto: str) -> str | None:
+    """`Chat.remoteJid` del chat 1:1 de ese teléfono, cubriendo las DOS formas
+    de direccionamiento que esta cuenta usa a la vez (medido el 2026-10-13 en
+    SIXGARDENS: de 174 chats 1:1, 120 van por LID y 54 por JID de teléfono):
+
+      · **JID de teléfono** (`5212851122710@s.whatsapp.net`): el número está en
+        el propio `remoteJid`, match directo.
+      · **LID** (`54271340990484@lid`): el `remoteJid` no contiene el número;
+        el teléfono real viaja en `key.remoteJidAlt` del último mensaje del
+        chat, que `findChats` ya devuelve.
+
+    ⚠ Cubrir solo el camino LID era un hueco real: habría ignorado la etiqueta
+    en ~1 de cada 3 chats recientes.
+
+    `findChats` solo devuelve chats con actividad reciente (verificado el
+    2026-10-13: 186 de los que la cuenta acumula). No es limitante para este
+    uso — un contacto en follow-up activo tiene mensajes recientes por
+    definición, y los 13 activos de SIXGARDENS resolvieron 13/13 — pero por si
+    acaso, si el índice falla se intenta el JID de teléfono canónico directo."""
+
+    def calcular():
+        chats = _pedir_evolution(cfg, f"/chat/findChats/{cfg['instancia']}", {})
+        if not isinstance(chats, list):
+            return {}
+        indice = {}
+        for chat in chats:
+            jid = chat.get("remoteJid") or ""
+            if not jid or jid.endswith("@g.us"):
+                continue
+            candidatos = [jid.split("@", 1)[0]]
+            alt = ((chat.get("lastMessage") or {}).get("key") or {}).get("remoteJidAlt")
+            if alt:
+                candidatos.append(str(alt).split("@", 1)[0])
+            for candidato in candidatos:
+                llave = telefono.corto(candidato)
+                if llave:
+                    indice.setdefault(llave, jid)
+        return indice
+
+    jid = _cache_barrido("indice_chats", calcular).get(corto)
+    if jid:
+        return jid
+    directo = f"{telefono.canonico_whatsapp(corto)}@s.whatsapp.net"
+    chat = _pedir_evolution(
+        cfg, f"/chat/findChatByRemoteJid/{cfg['instancia']}?remoteJid={directo}"
+    )
+    return directo if isinstance(chat, dict) and chat.get("remoteJid") else None
+
+
+def _es_cliente_por_etiqueta(contact_name: str) -> bool:
+    """Fallback Fase 2: ¿el chat de WhatsApp Business de este `Contact` trae la
+    etiqueta nativa "Cliente"? Se resuelve contra la API REST de la instancia
+    Evolution del sitio.
+
+    Camino del dato:
+      `Contact.mobile_no`/`phone` (por los últimos 10 dígitos, el criterio de
+      identidad de todo el CRM — `utils/telefono.corto`)
+        --`/chat/findChats`-->       `Chat.remoteJid` del chat 1:1 (LID o JID
+                                     de teléfono, ver `_remote_jid_de_telefono`)
+        --`/chat/findChatByRemoteJid`--> `labels` (lista de `labelId`)
+        --`/label/findLabels`-->     se cruza contra el `labelId` cuyo nombre
+                                     es la etiqueta configurada.
+
+    Fail-closed en cada paso — perder un follow-up es más seguro que mandárselo
+    a quien ya es cliente, mismo sesgo que el resto del módulo: sin claves en
+    `site_config.json`, sin teléfono en el `Contact`, sin chat, sin etiqueta
+    creada en la cuenta, o ante cualquier error de red → `False`.
+
+    ⚠ LIMITACIÓN SIN VERIFICAR (no bloqueante para el código, sí para confiar
+    en el resultado): medido el 2026-10-13, la tabla `Chat` de SIXGARDENS tiene
+    sus 89 filas creadas en el mismo segundo (sync inicial del 14-sep) y solo
+    UNA se actualizó después, y no hay ni un evento `labels association` en los
+    logs disponibles. El código de Evolution sí hace `INSERT ... ON CONFLICT`
+    al etiquetar (crearía la fila aunque no exista), pero **no está confirmado
+    con un caso real** que el evento llegue desde el teléfono. Validar con un
+    chat de prueba etiquetado a mano antes de confiar en este fallback."""
+    if not contact_name:
+        return False
+    cfg = _config_evolution()
+    if not cfg:
+        return False
+    datos = frappe.db.get_value("Contact", contact_name, ["mobile_no", "phone"], as_dict=True) or {}
+    corto = telefono.corto(datos.get("mobile_no") or datos.get("phone"))
+    if not corto:
+        return False
+    ids_cliente = _label_ids_cliente(cfg)
+    if not ids_cliente:
+        return False
+    jid = _remote_jid_de_telefono(cfg, corto)
+    if not jid:
+        return False
+    chat = _pedir_evolution(
+        cfg, f"/chat/findChatByRemoteJid/{cfg['instancia']}?remoteJid={jid}"
+    )
+    if not isinstance(chat, dict):
+        return False
+    etiquetas_del_chat = chat.get("labels") or []
+    if not isinstance(etiquetas_del_chat, list):
+        return False
+    return bool({str(x) for x in etiquetas_del_chat} & {str(x) for x in ids_cliente})
 
 
 def _es_cliente(contact_name: str | None) -> bool:
-    """Mismo vínculo que `facturacion.cartera_de_contacto`: Contact.ghl_contact_id
-    -> Customer.ghl_contact_id. Sin vínculo, NO se asume cliente (falso negativo
+    """Mismo vínculo que `facturacion.cartera_de_contacto`: `Dynamic Link`
+    Contact -> Customer. Sin vínculo, NO se asume cliente (falso negativo
     es más seguro aquí: perdemos un follow-up, no arriesgamos molestar a un
     cliente que paga).
 
-    Guard `erpnext` (2026-09-27): sin el doctype `Customer` — ningún sitio de
-    cliente tiene erpnext hoy — el vínculo no puede existir. Se retorna `False`
-    explícito sin consultas muertas, mismo patrón que
-    `cliente_erp._asegurar_customer`. Consecuencia: el filtro queda **inerte por
-    diseño** en esos sitios; quien de verdad protege el barrido es la allowlist
-    fail-closed de `barrer()` (`autofollow_inboxes`), no este criterio.
+    Guard `erpnext` (2026-09-27, Fase 2 implementada 2026-10-12): sin el
+    doctype `Customer` — ningún sitio de cliente tiene erpnext hoy — el
+    vínculo original no puede existir. En vez de `False` directo, se delega a
+    `_es_cliente_por_etiqueta` (fallback por la etiqueta nativa "Cliente" de
+    WhatsApp Business, ver docstring de esa función). Si el sitio no tiene las
+    claves de acceso en `site_config.json` (`evolution_api_*`), ese fallback
+    también es `False` sin consultar nada — mismo resultado que antes, cero
+    regresión en sitios que no lo configuren.
 
-    FIX 2026-10-12: tener `Customer` vinculado YA NO es suficiente — desde
-    `cliente_erp.crear_customer_si_falta` (25-sep) todo `Contact` nuevo recibe
-    un Customer automático, incluso leads que nunca compraron. "Cliente
-    activo" ahora exige evidencia real de compra: al menos una `Sales Invoice`
-    sometida (`docstatus=1`) de ese Customer. Sin invoice sometida, sigue
-    siendo lead elegible para autofollowup aunque tenga Customer.
-
-    FASE 2 (documentada, NO implementada): el filtro semántico real —"cliente
-    que paga *dentro* de un inbox permitido"— se resuelve marcando el `Contact`
-    (p. ej. `tipo_relacion` / `is_billing_contact`) y exige que el cliente pueble
-    el dato. Hasta entonces no se implementa aquí.
+    Sigue siendo cierto que quien de verdad protege el barrido es la allowlist
+    fail-closed de `barrer()` (`autofollow_inboxes`), no este criterio — este
+    fallback reduce falsos negativos, no es la única defensa.
     """
-    if "erpnext" not in frappe.get_installed_apps():
-        return False
     if not contact_name:
         return False
-    ghl_id = frappe.db.get_value("Contact", contact_name, "ghl_contact_id")
-    if not ghl_id:
-        return False
-    customer = frappe.db.get_value("Customer", {"ghl_contact_id": ghl_id}, "name")
-    if not customer:
-        return False
-    return bool(frappe.db.get_value("Sales Invoice", {"customer": customer, "docstatus": 1}, "name"))
+    if "erpnext" not in frappe.get_installed_apps():
+        return _es_cliente_por_etiqueta(contact_name)
+    # Vínculo nativo (`Dynamic Link`), no el viejo `ghl_contact_id`: ver
+    # `utils/cliente_erp.py`. Con el campo de texto, un contacto fusionado
+    # podía resolver al Customer equivocado (o a ninguno).
+    from frappe_chatwoot.utils import cliente_erp
+
+    return bool(cliente_erp.customer_de_contacto(contact_name))
 
 
 def _deal_de(conversation_id) -> dict | None:
@@ -132,6 +346,76 @@ def _ultimo_es_humano(last_msg: dict) -> bool:
     if ca.get("automatico"):
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Guard "disponibilidad cerrada" (2026-10-15)
+# ---------------------------------------------------------------------------
+#
+# Origen: hallazgo del 2026-10-13 en Six Gardens (conv 1076 inbox 7, deal
+# `CRM-DEAL-2026-00045`) — el autofollow-up seguía insistiéndole a Lizeth
+# Guadarrama sobre una fecha (18-20 dic) que el staff YA había cerrado por
+# falta de cupo, preguntándole si quería que "un asesor revise si se liberó
+# algo". Bug DISTINTO al de `_es_cliente_por_etiqueta` (ese excluye a quien ya
+# ES cliente; este excluye a quien ya recibió un NO para lo que pidió, sea o
+# no cliente — Lizeth es un prospecto rechazado, deal en "Lead", nunca pagó
+# ni reservó, no aplica el criterio 2).
+#
+# Mismo patrón que el guard de salida `lib/guard-disponibilidad.js` del
+# proyecto hermano `agente-ia` (Sofía Lite) — ahí se NEUTRALIZA en vivo la
+# frase que el modelo intenta decir; aquí se LEE el historial ya enviado para
+# decidir si vale la pena seguir insistiendo. Se portan solo las frases de
+# NEGACIÓN de ese archivo: que el agente haya dicho "sí tengo disponibilidad"
+# no es señal de que haya que parar el follow-up, es la señal contraria.
+# Mantener las dos listas sincronizadas a mano si se edita una — no hay build
+# compartido entre JS y Python.
+PATRONES_DISPONIBILIDAD_CERRADA = [
+    re.compile(r"\bno tengo disponibilidad\b", re.IGNORECASE),
+    re.compile(r"\bno hay disponibilidad\b", re.IGNORECASE),
+    re.compile(r"\bsin disponibilidad\b", re.IGNORECASE),
+    re.compile(r"\bno est[áa]\s+disponible\b", re.IGNORECASE),
+]
+
+# Cuántos mensajes de la página más reciente se revisan. `list_messages` sin
+# `before`/`after` ya devuelve solo una página (máx. 100, orden ascendente) —
+# este tope es defensivo, no una paginación real: si la respuesta "ya no hay
+# disponibilidad" quedó más atrás que esto, es una conversación vieja que de
+# todos modos cayó fuera de `dias_max` en `clasificar()`.
+LIMITE_MENSAJES_DISPONIBILIDAD = 30
+
+
+def _tiene_disponibilidad_cerrada(conversation_id) -> bool:
+    """¿Ya se le dijo a este prospecto, en esta misma conversación, que NO
+    hay disponibilidad para la fecha que preguntó? Si sí, un follow-up
+    ("¿ya pudiste confirmar...?") solo le da falsa esperanza — caso real:
+    Lizeth Guadarrama, ver bloque de arriba.
+
+    Revisa los mensajes SALIENTES (del bot o del staff — ambos cuentan: el
+    prospecto ya recibió la respuesta sin importar quién la escribió) de la
+    página más reciente de la conversación.
+
+    Fail-closed INVERTIDO a propósito respecto al resto del módulo: ante
+    cualquier error de red o respuesta vacía se asume que NO está cerrada
+    (`False`) — perder esta exclusión una corrida y mandar un follow-up de
+    más es más seguro que la inversa, porque `clasificar()` se vuelve a
+    correr en cada barrido (no es una ventana que se cierra para siempre)."""
+    if not conversation_id:
+        return False
+    try:
+        pagina = chatwoot_client.list_messages(conversation_id)
+    except Exception as e:
+        frappe.log_error(
+            title="autofollowup._tiene_disponibilidad_cerrada", message=str(e)
+        )
+        return False
+    mensajes = (pagina or {}).get("payload") or []
+    for m in mensajes[-LIMITE_MENSAJES_DISPONIBILIDAD:]:
+        if m.get("message_type") not in (1, "outgoing"):
+            continue
+        texto = m.get("content") or ""
+        if any(p.search(texto) for p in PATRONES_DISPONIBILIDAD_CERRADA):
+            return True
+    return False
 
 
 @frappe.whitelist()
@@ -167,11 +451,13 @@ def clasificar(inbox_id, dias_max: int = 30) -> dict:
         if _ultimo_es_humano(last):
             motivo = "último mensaje es de un humano del equipo"
         elif _es_cliente(deal.get("contact")):
-            motivo = "es cliente activo (Customer con Sales Invoice sometida)"
+            motivo = "es cliente activo (Customer vinculado)"
         elif _tiene_secuencia_activa(deal.get("name")):
             motivo = "ya está en una Secuencia activa"
         elif deal.get("status") in ("Won", "Lost"):
             motivo = f"deal cerrado ({deal.get('status')})"
+        elif _tiene_disponibilidad_cerrada(c["id"]):
+            motivo = "ya se confirmó sin disponibilidad para la fecha consultada"
 
         sender = (c.get("meta") or {}).get("sender") or {}
         resultado.append({
@@ -221,12 +507,11 @@ DELAY_ENTRE_ENVIOS_SEG = (60, 120)
 # `inbox_id` (ints) elegibles; cualquier otro inbox queda fuera, **incluso con
 # `forzar_inbox`** (el bypass manual NO se salta la allowlist).
 #
-# Declarado 2026-10-09 en los 8 sitios activos (el inbox real del agente de
-# cada uno): lavendi.mx [5], grupogardenias [18], sixgardens [7], eeplv [14],
-# ena [15], medicare [13], resanic [16], estrublock [8]. Esplendido [17]
-# pendiente (a medio onboarding esa fecha). Un sitio NO se enciende solo por
-# declarar la clave: encender autofollow (`followup_activo=1`) sigue siendo
-# una llamada aparte (`guardar_config`) — ver docstring del módulo.
+# Valor sugerido por sitio (solo propuesta, NO se escribe aquí): el inbox real
+# del agente del cliente — p. ej. `"autofollow_inboxes": [7]` en sixgardens
+# (inbox 7) y `[18]` en grupogardenias (inbox 18). Un sitio NO se enciende solo
+# por declarar la clave: encender autofollow (`followup_activo=1`) es una acción
+# explícita y aparte.
 CLAVE_INBOXES = "autofollow_inboxes"
 
 
@@ -399,6 +684,8 @@ def _sigue_elegible(fila) -> str | None:
         contacto = frappe.db.get_value("CRM Deal", fila.deal, "contact")
         if _es_cliente(contacto):
             return "el contacto ya es cliente activo"
+    if _tiene_disponibilidad_cerrada(fila.conversation_id):
+        return "ya se confirmó sin disponibilidad para la fecha consultada"
     return None
 
 

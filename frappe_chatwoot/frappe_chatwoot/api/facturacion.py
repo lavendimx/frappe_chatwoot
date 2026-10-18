@@ -23,6 +23,8 @@ import re
 
 import frappe
 
+from frappe_chatwoot.utils import cliente_erp
+
 # Contabilidad y dirección comercial. Un Sales User cualquiera no ve la cartera
 # completa de la agencia: es información de negocio, no de su pipeline.
 ALLOWED_ROLES = ["System Manager", "Accounts Manager", "Accounts User", "Sales Manager"]
@@ -1244,6 +1246,88 @@ def eliminar_recurrente(name: str) -> dict:
     return {"ok": True, "facturas_conservadas": emitidas}
 
 
+# Sufijo que ERPNext/Frappe agregan solos cuando un nombre ya existe:
+# "Irene Martinez (2)", "Hector Morelos - 1". Es ruido de máquina, nunca parte
+# del nombre de una persona — si se deja, el selector muestra "Irene Martinez"
+# e "Irene Martinez (2)" como si fueran dos clientes distintos.
+#
+# El guion EXIGE espacio antes (`\s+-`), no basta con `-\d+$`. Medido sobre los
+# datos reales: sin esa exigencia, "proud-wildflower-867" se normalizaba a
+# "proud-wildflower" y habría colapsado con cualquier otro "proud-wildflower-N",
+# y el contacto "Int. Casa Bosques 8-1-21" perdía el "-21". Frappe siempre
+# escribe " - N" con espacios, así que acotar el patrón no pierde ningún caso
+# real y evita mutilar nombres que legítimamente terminan en número.
+_SUFIJO_AUTOGENERADO = re.compile(r"(?:\s*\(\d+\)|\s+-\s*\d+)\s*$")
+
+
+def _nombre_normalizado(nombre: str) -> str:
+    """Sin acentos, en minúsculas, sin el sufijo automático y con las palabras
+    ordenadas, para que "Moreno Eleazer" y "Eleazer Moreno" den la misma cadena.
+
+    Ordenar las palabras es lo que hace que el orden invertido colapse; quitar
+    el sufijo es lo que hace que colapse el duplicado que creó ERPNext solo.
+    """
+    import unicodedata
+
+    nombre = (nombre or "").strip()
+    nombre = _SUFIJO_AUTOGENERADO.sub("", nombre).lower()
+    nombre = "".join(
+        ch for ch in unicodedata.normalize("NFD", nombre)
+        if unicodedata.category(ch) != "Mn"
+    )
+    return " ".join(sorted(nombre.split()))
+
+
+def _claves_identidad(fila: dict) -> list[str]:
+    """TODAS las señales por las que dos filas del selector pueden ser la misma
+    persona. Se devuelven juntas a propósito: el agrupado de abajo une por
+    CUALQUIERA que coincida, no por una sola elegida por prioridad.
+
+    Elegir una sola clave fue un error medido el 2026-10-18: con "contacto si
+    hay, si no el nombre", `Moreno Eleazer` (huérfano, sin contacto) y
+    `Eleazer Moreno SG` (con contacto) caían en grupos distintos y el selector
+    los seguía mostrando por separado — justo el síntoma que se quería matar.
+    """
+    claves = []
+    if fila.get("contact"):
+        claves.append(f"contact:{fila['contact']}")
+    norm = _nombre_normalizado(fila.get("customer_name") or "")
+    if norm:
+        claves.append(f"nombre:{norm}")
+    return claves or [f"self:{fila['name']}"]
+
+
+def _agrupar_por_identidad(filas: list[dict]) -> list[list[dict]]:
+    """Componentes conexas: dos filas quedan en el mismo grupo si comparten
+    CUALQUIER clave de identidad, y la relación se propaga (si A comparte
+    contacto con B y B comparte nombre con C, los tres son la misma persona)."""
+    padre: dict[str, str] = {}
+
+    def raiz(x: str) -> str:
+        while padre.setdefault(x, x) != x:
+            padre[x] = padre[padre[x]]
+            x = padre[x]
+        return x
+
+    def unir(a: str, b: str) -> None:
+        ra, rb = raiz(a), raiz(b)
+        if ra != rb:
+            padre[ra] = rb
+
+    for f in filas:
+        claves = _claves_identidad(f)
+        f["_claves"] = claves
+        for k in claves[1:]:
+            unir(claves[0], k)
+
+    grupos: dict[str, list[dict]] = {}
+    for f in filas:
+        grupos.setdefault(raiz(f["_claves"][0]), []).append(f)
+    for f in filas:
+        f.pop("_claves", None)
+    return list(grupos.values())
+
+
 @frappe.whitelist()
 def buscar_clientes(q: str = "", limit: int = 20) -> list[dict]:
     """Selector de 'Nuevo cargo'. Devuelve `Customer` (clientes ya de alta en
@@ -1252,7 +1336,18 @@ def buscar_clientes(q: str = "", limit: int = 20) -> list[dict]:
     elegirlos (ver `_resolver_customer`). Solo 99 de 4,291 contactos tenían
     `Customer` antes de esto (2026-09-26) — sin la rama de `Contact`, el
     99.98% del CRM era invisible aquí y obligaba a pasar primero por el Desk
-    de ERPNext."""
+    de ERPNext.
+
+    DEDUP POR IDENTIDAD, NO POR NOMBRE (2026-10-18)
+        Este selector mostró dos veces a "Eleazer Moreno" con el contacto ya
+        fusionado: dos `Customer` activos para la misma persona, con nombres
+        distintos ("Eleazer Moreno SG" y "Moreno Eleazer"). La causa de fondo
+        la arregla la fusión (`panel.consolidar_customers_de_fusion`), pero el
+        selector es la pantalla donde el error se vuelve un cobro mal emitido,
+        así que colapsa por `Contact` resuelto como última línea de defensa:
+        aunque queden dos Customer sueltos, el equipo ve una sola fila.
+        Entre dos Customer de la misma persona gana el que tiene facturas.
+    """
     validate_role()
     q = (q or "").strip()
     limit = frappe.utils.cint(limit) or 20
@@ -1262,11 +1357,24 @@ def buscar_clientes(q: str = "", limit: int = 20) -> list[dict]:
         filtros["customer_name"] = ["like", f"%{q}%"]
     clientes = frappe.get_all(
         "Customer", filters=filtros, fields=["name", "customer_name"],
-        order_by="customer_name asc", limit_page_length=limit,
+        order_by="customer_name asc",
+        # Se pide de más a propósito: el dedup de abajo puede colapsar varias
+        # filas en una, y recortar antes dejaría la lista corta.
+        limit_page_length=limit * 3,
     )
-    resultados = [{**c, "tipo": "customer"} for c in clientes]
+    resultados = []
+    for c in clientes:
+        resultados.append({
+            **c,
+            "tipo": "customer",
+            "contact": cliente_erp.contacto_de_customer(c["name"]),
+            "facturas": frappe.db.count("Sales Invoice", {"customer": c["name"]}),
+        })
 
     if len(q) >= 2:
+        # Contacts que todavía no tienen Customer activo. El `NOT EXISTS` ahora
+        # va contra el `Dynamic Link` nativo, no contra el viejo `ghl_contact_id`
+        # (ver `utils/cliente_erp.py` para el porqué del cambio de vínculo).
         contactos = frappe.db.sql(
             """
             SELECT DISTINCT c.name, c.full_name
@@ -1274,26 +1382,46 @@ def buscar_clientes(q: str = "", limit: int = 20) -> list[dict]:
             LEFT JOIN `tabContact Phone` cp ON cp.parent = c.name
             LEFT JOIN `tabContact Email` ce ON ce.parent = c.name
             WHERE (c.full_name LIKE %(q)s OR cp.phone LIKE %(q)s OR ce.email_id LIKE %(q)s)
-              -- Ya tiene Customer vinculado por ghl_contact_id: ya salió en
-              -- `clientes` arriba (con su propio nombre) o saldrá al buscar
-              -- por ese nombre — no duplicar la entrada aquí.
               AND NOT EXISTS (
-                  SELECT 1 FROM `tabCustomer` cu
-                  WHERE cu.ghl_contact_id = c.ghl_contact_id
-                    AND c.ghl_contact_id IS NOT NULL AND c.ghl_contact_id != ''
+                  SELECT 1
+                  FROM `tabDynamic Link` dl
+                  JOIN `tabCustomer` cu ON cu.name = dl.link_name
+                  WHERE dl.parenttype = 'Contact'
+                    AND dl.parent = c.name
+                    AND dl.link_doctype = 'Customer'
+                    AND cu.disabled = 0
               )
             ORDER BY c.full_name ASC
             LIMIT %(limit)s
             """,
-            {"q": f"%{q}%", "limit": limit},
+            {"q": f"%{q}%", "limit": limit * 3},
             as_dict=True,
         )
         resultados += [
-            {"name": ct["name"], "customer_name": ct["full_name"] or ct["name"], "tipo": "contact"}
+            {
+                "name": ct["name"],
+                "customer_name": ct["full_name"] or ct["name"],
+                "tipo": "contact",
+                "contact": ct["name"],
+                "facturas": 0,
+            }
             for ct in contactos
         ]
 
-    return resultados[:limit]
+    # Colapso final. Gana el que ya es `Customer` sobre el que solo es `Contact`
+    # (elegir el Contact crearía un Customer nuevo al vuelo — justo el segundo
+    # duplicado que se quiere evitar), y entre dos Customer gana el de más
+    # facturas: reasignar facturas es la operación con riesgo contable.
+    ganadores = []
+    for grupo in _agrupar_por_identidad(resultados):
+        ganadores.append(
+            max(grupo, key=lambda f: (f["tipo"] == "customer", f["facturas"]))
+        )
+
+    salida = sorted(ganadores, key=lambda f: (f.get("customer_name") or "").lower())
+    for f in salida:
+        f.pop("facturas", None)
+    return salida[:limit]
 
 
 @frappe.whitelist()
@@ -1344,11 +1472,18 @@ def facturas_candidatas(q: str = "", limit: int = 30) -> list[dict]:
 #     Además se pide por separado: la apertura de un hilo no debe pagar dos
 #     consultas más para un dato que la mayoría de las veces es "$0".
 #
-# EL VÍNCULO ES `Customer.ghl_contact_id`, NO EL NOMBRE
-#     Ver `patches/vincular_customer_contacto.py`. Emparejar por nombre le
-#     colgaría los adeudos de un cliente a otro en la pantalla que el equipo
-#     mira MIENTRAS habla con él. Si el contacto no tiene Customer vinculado se
-#     devuelve `vinculado: False` — explícito, nunca un saldo adivinado.
+# EL VÍNCULO ES EL `Dynamic Link` NATIVO, NO EL NOMBRE
+#     Emparejar por nombre le colgaría los adeudos de un cliente a otro en la
+#     pantalla que el equipo mira MIENTRAS habla con él. Si el contacto no
+#     tiene Customer vinculado se devuelve `vinculado: False` — explícito,
+#     nunca un saldo adivinado.
+#
+#     Hasta el 2026-10-18 el puente era `Customer.ghl_contact_id`, heredado de
+#     GoHighLevel. Se migró al `Dynamic Link` de Frappe porque el campo de
+#     texto se desincronizaba en silencio al fusionar contactos (caso "Eleazer
+#     Moreno": dos clientes en el selector con el contacto ya fusionado). Toda
+#     resolución pasa ahora por `utils/cliente_erp.py` — ahí está el porqué
+#     completo.
 
 MAX_FACTURAS_PANEL = 5
 MAX_PAGOS_PANEL = 3
@@ -1367,10 +1502,7 @@ def cartera_de_contacto(contact: str) -> dict:
     if not any(r in roles for r in ALLOWED_ROLES) and frappe.session.user != "Administrator":
         return {"permitido": False}
 
-    ghl_id = frappe.db.get_value("Contact", contact, "ghl_contact_id")
-    customer = None
-    if ghl_id:
-        customer = frappe.db.get_value("Customer", {"ghl_contact_id": ghl_id}, "name")
+    customer = cliente_erp.customer_de_contacto(contact)
     if not customer:
         # Sin Customer todavía: no se adivina el saldo, pero sí se manda el
         # nombre para que "Nueva nota de cobro" pueda ofrecer crearlo al vuelo
@@ -1685,28 +1817,27 @@ CORREOS_PLACEHOLDER = (
 
 
 def _destinatario_nota(cliente: str) -> str:
-    """Resuelve el correo del cliente con el ÚNICO vínculo confiable de esta
-    base: `Customer.ghl_contact_id` -> `Contact` -> `Contact Email` (primario).
+    """Resuelve el correo del cliente por el vínculo nativo:
+    `Customer` -> `Contact` (Dynamic Link) -> `Contact Email` (primario).
 
     Ver `cartera_de_contacto`: emparejar por nombre le colgaría los adeudos de
     un cliente a otro. Sin correo resuelto se levanta error explícito — nunca
     un destinatario adivinado, porque un correo de cobranza no se puede
     retractar.
     """
-    ghl_id = (frappe.db.get_value("Customer", cliente, "ghl_contact_id") or "").strip()
-    if not ghl_id:
+    contact = cliente_erp.contacto_de_customer(cliente)
+    if not contact:
         frappe.throw("Sin correo del cliente: el cliente no tiene contacto vinculado.")
 
     filas = frappe.db.sql(
         """
         SELECT ce.email_id
         FROM `tabContact Email` ce
-        JOIN `tabContact` c ON c.name = ce.parent
-        WHERE c.ghl_contact_id = %s
+        WHERE ce.parent = %s
         ORDER BY ce.is_primary DESC, ce.idx ASC
         LIMIT 1
         """,
-        ghl_id,
+        contact,
         as_dict=True,
     )
     correo = (filas[0]["email_id"] if filas else "").strip()
