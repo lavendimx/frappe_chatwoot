@@ -1125,10 +1125,18 @@ def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Mon
     """Crea una recurrente desde cero.
 
     `emision` es la fecha exacta de la primera factura (el molde) — hoy por
-    default, pero puede ser futura. No hace falta el ajuste de mes de
-    `crear_desde_factura`: al no haber una factura previa que empuje el
+    default, pero puede ser pasada o futura. No hace falta el ajuste de mes
+    de `crear_desde_factura`: al no haber una factura previa que empuje el
     calendario, el `start_date` de la recurrente es la propia fecha de
     emisión, y la siguiente ya cae justo un período después.
+
+    Si `emision` es pasada, la factura molde sí queda con ese `posting_date`
+    (Sales Invoice lo acepta sin problema), pero `Auto Repeat.before_insert`
+    empuja el `start_date` de la plantilla a hoy — mismo comportamiento ya
+    documentado en `_start_date_para_emision`. La próxima emisión cae un
+    período después de HOY, no de la fecha pasada que se dio; quien use una
+    fecha pasada aquí lo hace para dejar constancia retroactiva del molde,
+    no para reanclar el calendario.
     """
     validate_role()
     if frecuencia not in FRECUENCIAS:
@@ -1137,8 +1145,6 @@ def crear_recurrente(customer: str, concepto: str, monto, frecuencia: str = "Mon
 
     hoy = frappe.utils.getdate(frappe.utils.today())
     emision = frappe.utils.getdate(emision) if emision else hoy
-    if emision < hoy:
-        frappe.throw("La fecha de emisión no puede ser anterior a hoy")
 
     if not frappe.utils.cint(forzar):
         dup = _duplicado_recurrente(customer, monto)
@@ -1169,14 +1175,16 @@ def crear_factura(customer: str, concepto: str, monto, emision: str = None,
     lista de precios y series que no aplican a este uso. Mismo alcance que el
     resto del módulo: sin timbrado CFDI ni envío al cliente (ver encabezado
     del archivo) — quien necesite eso sigue yendo al Desk.
+
+    `emision` acepta fecha pasada, hoy o futura — Sales Invoice no tiene
+    restricción propia de backdating; el único guardrail que sigue vigente
+    es el de ERPNext (Fiscal Year / Period Closing Voucher), que ya bloquea
+    emitir dentro de un periodo contable cerrado.
     """
     validate_role()
     customer, monto = _validar_monto_y_cliente(customer, monto)
 
-    hoy = frappe.utils.getdate(frappe.utils.today())
-    emision = frappe.utils.getdate(emision) if emision else hoy
-    if emision < hoy:
-        frappe.throw("La fecha de emisión no puede ser anterior a hoy")
+    emision = frappe.utils.getdate(emision) if emision else frappe.utils.getdate(frappe.utils.today())
 
     inv = _emitir_factura(customer, concepto, monto, emision, dias_credito, MARCA_FACTURA_CRM)
     d = detalle(inv.name)
