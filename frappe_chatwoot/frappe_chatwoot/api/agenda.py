@@ -28,6 +28,8 @@ import urllib.request
 
 import frappe
 
+from frappe_chatwoot.utils import telefono as tel
+
 from .chatwoot import validate_role
 
 TIMEOUT_AGENDA = 30  # Google Calendar + Meet tarda; 10s (el de Evolution) se queda corto.
@@ -349,21 +351,104 @@ def invitados_de_cita(name: str) -> list[dict]:
     )
 
 
+def _contactos_del_mismo_telefono(contacto: str) -> list[str]:
+    """Todos los `Contact` con el mismo teléfono corto que `contacto` (sus
+    duplicados), incluyéndose a él mismo.
+
+    Reusa el criterio de identidad del CRM —últimos 10 dígitos
+    (`utils/telefono.corto`, el mismo de `panel._contacto_por_telefono`)— para
+    no divergir. Si no se puede determinar un teléfono corto, devuelve solo
+    `[contacto]`: el comportamiento previo."""
+    valores = frappe.db.get_value("Contact", contacto, ["mobile_no", "phone"], as_dict=True)
+    corto = None
+    if valores:
+        corto = tel.corto(valores.get("mobile_no")) or tel.corto(valores.get("phone"))
+    nombres = {contacto}
+    if corto:
+        patron = f"%{corto}"
+        for campo in ("mobile_no", "phone"):
+            for fila in frappe.get_all(
+                "Contact", filters=[[campo, "like", patron]], fields=["name"]
+            ):
+                nombres.add(fila["name"])
+    return sorted(nombres)
+
+
+def _conversaciones_de_contactos(contactos: list[str]) -> set[str]:
+    """IDs de conversación de Chatwoot ligados a esos contactos.
+
+    El id no vive en `Contact` sino en su `CRM Deal`/`CRM Lead` (campos
+    `contact` + `chatwoot_conversation_id`, escritos por
+    `api/panel._escribir_conversation_id`). Sirve para citas cuya `crm_contacto`
+    quedó en blanco o en otra ficha pero cuyo hilo es el mismo."""
+    ids: set[str] = set()
+    for doctype in ("CRM Deal", "CRM Lead"):
+        for fila in frappe.get_all(
+            doctype,
+            filters={"contact": ["in", contactos]},
+            fields=["chatwoot_conversation_id"],
+        ):
+            cid = (fila.get("chatwoot_conversation_id") or "").strip()
+            if cid:
+                ids.add(cid)
+    return ids
+
+
 @frappe.whitelist()
 def citas_de_contacto(contacto: str) -> list[dict]:
-    """Citas (Reunion Agendada) de un Contact — para el panel de contexto de
+    """Citas (Reunion Agendada) del Contact y de su hilo — panel de contexto de
     Conversaciones (Alejandro, 2026-09-17): antes solo se veían en la pantalla
-    Calendario, sin cruce con el hilo del contacto."""
+    Calendario, sin cruce con el hilo del contacto.
+
+    El filtro original era `crm_contacto == contacto` exacto. Falla con
+    contactos DUPLICADOS (mismo teléfono, dos fichas): el panel resuelve el
+    Contact con `panel._contacto_por_telefono` (orden `modified desc`) y puede
+    caer en la ficha "hermana", distinta de la anotada en
+    `Reunion Agendada.crm_contacto` — la cita existe pero el panel decía "Sin
+    citas registradas con este contacto" (caso Eleazer Moreno, conv 3800,
+    2026-10-14).
+
+    Ahora se cruza por la identidad real (teléfono corto, mismo criterio que
+    `utils.telefono.corto`): se juntan todos los Contact con el mismo teléfono y
+    se devuelven sus citas, más las citas cuyo `chatwoot_conversation_id`
+    pertenece a una conversación de alguno de esos contactos. Sigue aceptando
+    solo `contacto` (compatibilidad con el llamador del panel)."""
     validate_role()
     if not contacto:
         return []
-    return frappe.get_all(
+    contactos = _contactos_del_mismo_telefono(contacto)
+    campos = [
+        "name", "nombre_participante", "start_datetime", "end_datetime",
+        "motivo", "meet_link", "origen", "modalidad", "ubicacion",
+    ]
+    # Dos consultas separadas y unión en Python: la sintaxis de grupo `or` de
+    # los filtros de `get_all` no es fiable aquí (rompía con 500
+    # "'list' object has no attribute 'lower'"). Cada condición por separado es
+    # una entrada de filtro válida.
+    filas = frappe.get_all(
         "Reunion Agendada",
-        filters={"crm_contacto": contacto},
-        fields=[
-            "name", "nombre_participante", "start_datetime", "end_datetime",
-            "motivo", "meet_link", "origen", "modalidad", "ubicacion",
-        ],
+        filters={"crm_contacto": ["in", contactos]},
+        fields=campos,
         order_by="start_datetime desc",
         limit_page_length=20,
     )
+    conversaciones = _conversaciones_de_contactos(contactos)
+    if conversaciones:
+        filas += frappe.get_all(
+            "Reunion Agendada",
+            filters={"chatwoot_conversation_id": ["in", sorted(conversaciones)]},
+            fields=campos,
+            order_by="start_datetime desc",
+            limit_page_length=20,
+        )
+    # Dedupe por `name` (una cita puede empatar por contacto Y por conversación)
+    # y reorden en Python, porque la unión rompe el orden global.
+    vistas: set[str] = set()
+    salida: list[dict] = []
+    for fila in filas:
+        if fila["name"] in vistas:
+            continue
+        vistas.add(fila["name"])
+        salida.append(fila)
+    salida.sort(key=lambda f: f.get("start_datetime") or "", reverse=True)
+    return salida[:20]
