@@ -468,6 +468,44 @@ def link_de_pago(factura: str) -> dict:
     return {"ok": True, "url": f"{_url_publica()}/pagar?f={token}"}
 
 
+def link_pago_para_imprimir(factura: str) -> str | None:
+    """Link de pago para incrustar en documentos impresos (Nota de cobro).
+
+    A diferencia de `link_de_pago()`, NUNCA truena — una factura ya pagada,
+    cancelada o con Stripe apagado simplemente se queda sin el bloque de pago
+    con tarjeta en el PDF (la CLABE del párrafo de al lado sigue sirviendo),
+    en vez de reventar la generación de la nota completa.
+
+    Se expone a Jinja como global vía el hook `jinja` de `hooks.py` y se llama
+    desde el Print Format `Nota de cobro` como `link_pago_para_imprimir(...)`.
+    NO se usa `frappe.call(...)`: al renderizar un PDF no hay request HTTP, y
+    `frappe.call` -> `execute_cmd` -> `is_valid_http_method` revienta con
+    `AttributeError: request` (verificado en produccion el 2026-10-13). Al no
+    pasar por `/api/method`, no necesita `@frappe.whitelist()` — y asi tampoco
+    queda alcanzable por API directa. Aun asi repite el permiso estandar de
+    lectura sobre ESA Sales Invoice (no los roles de contabilidad de
+    `facturacion.validate_role`, que son para la pantalla de cobranza
+    completa, no para "¿puedo leer este documento puntual?").
+    """
+    try:
+        if not frappe.has_permission("Sales Invoice", doc=factura, ptype="read"):
+            return None
+        cfg = _cfg()
+        if not cfg.enabled:
+            return None
+        inv = frappe.db.get_value(
+            "Sales Invoice", factura, ["outstanding_amount", "docstatus"], as_dict=True,
+        )
+        if not inv or inv.docstatus != 1:
+            return None
+        if round(float(inv.outstanding_amount or 0), 2) <= 0:
+            return None
+        return f"{_url_publica()}/pagar?f={_token_pago(factura)}"
+    except Exception:
+        frappe.log_error(title="link_pago_para_imprimir")
+        return None
+
+
 def _checkout_session_factura(factura: str) -> str:
     """La sesión de Checkout real de una factura. Separada de `link_de_pago()`
     porque esta se llama en el momento del clic (`/pagar?f=`), no al generar
