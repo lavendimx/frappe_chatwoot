@@ -814,6 +814,7 @@ def _shape_conversation(
     ancladas: set = None,
     etiquetas: dict = None,
     colores: dict = None,
+    clientes: set = None,
 ) -> dict:
     """Aplana el objeto de Chatwoot a lo que la bandeja necesita pintar.
 
@@ -899,7 +900,65 @@ def _shape_conversation(
         # lavendi.mx: grupo de WhatsApp. La bandeja los pinta en una sección
         # aparte, debajo de las conversaciones individuales.
         "is_group": _es_grupo(sender),
+        # lavendi.mx: contacto ya etiquetado "cliente actual" (ver
+        # onboarding._marcar_cliente, que la aplica sola al ganar un Deal) —
+        # hallazgo de Zaira, 2026-10-19. `clientes` ya viene en lote (ver
+        # _telefonos_clientes); sin lote (llamada de una sola conversación)
+        # se resuelve aquí mismo, es un solo query barato.
+        "es_cliente": _es_cliente_telefono(sender.get("phone_number"), clientes),
     }
+
+
+def _es_cliente_telefono(telefono: str, clientes: set = None) -> bool:
+    """Helper de `_shape_conversation`. Con `clientes` ya resuelto en lote
+    (bandeja completa) es una comparación en memoria; sin lote (una sola
+    conversación, ej. get_conversation) hace su propia consulta — sigue
+    siendo un query, nunca una llamada HTTP a Chatwoot."""
+    digitos = re.sub(r"\D", "", telefono or "")[-10:]
+    if not digitos:
+        return False
+    if clientes is not None:
+        return digitos in clientes
+    return digitos in _telefonos_clientes([{"meta": {"sender": {"phone_number": telefono}}}])
+
+
+def _telefonos_clientes(conversations: list[dict]) -> set:
+    """Últimos 10 dígitos del teléfono de cada conversación cuyo Contact ya
+    está etiquetado "cliente actual" (ver utils/onboarding._marcar_cliente,
+    que aplica esa etiqueta sola cuando un CRM Deal pasa a Won).
+
+    Una sola consulta para toda la bandeja — el mismo patrón que
+    _ids_marcados/_etiquetas_y_colores, por la misma razón: resolver
+    contacto→cliente conversación por conversación (vía
+    get_contact_lead_or_deal_from_number, que hace una búsqueda en vivo contra
+    Chatwoot) dispararía un llamado HTTP por fila de la bandeja. Aquí se
+    compara por los últimos 10 dígitos porque el prefijo (+52, 521, etc.) no
+    es consistente entre todos los contactos."""
+    ultimos10 = set()
+    for conv in conversations:
+        telefono = ((conv.get("meta") or {}).get("sender") or {}).get("phone_number") or ""
+        digitos = re.sub(r"\D", "", telefono)[-10:]
+        if digitos:
+            ultimos10.add(digitos)
+    if not ultimos10:
+        return set()
+    try:
+        filas = frappe.db.sql(
+            """
+            SELECT DISTINCT RIGHT(REGEXP_REPLACE(cp.phone, '[^0-9]', ''), 10) AS ultimos10
+            FROM `tabContact Phone` cp
+            INNER JOIN `tabTag Link` tl
+                ON tl.document_type = 'Contact' AND tl.document_name = cp.parent
+            WHERE tl.tag = 'cliente actual'
+              AND RIGHT(REGEXP_REPLACE(cp.phone, '[^0-9]', ''), 10) IN %(ultimos10)s
+            """,
+            {"ultimos10": tuple(ultimos10)},
+            as_dict=True,
+        )
+        return {f["ultimos10"] for f in filas if f.get("ultimos10")}
+    except Exception:
+        # Degrada a "nadie es cliente todavía" — nunca debe tumbar la bandeja.
+        return set()
 
 
 def _ids_marcados(doctype: str) -> set:
@@ -1030,8 +1089,9 @@ def get_conversations(inbox_id=None, status: str = "open", page=None, archivadas
     archivadas_ids = _ids_marcados("Chatwoot Archivo")
     ancladas_ids = _ids_marcados("Chatwoot Anclaje")
     etiquetas, colores = _etiquetas_y_colores([c.get("id") for c in conversations])
+    clientes = _telefonos_clientes(conversations)
     shaped = [
-        _shape_conversation(c, pausadas, archivadas_ids, ancladas_ids, etiquetas, colores)
+        _shape_conversation(c, pausadas, archivadas_ids, ancladas_ids, etiquetas, colores, clientes)
         for c in conversations
     ]
     # El archivado es una vista, no un borrado: o se ven solo las archivadas o
