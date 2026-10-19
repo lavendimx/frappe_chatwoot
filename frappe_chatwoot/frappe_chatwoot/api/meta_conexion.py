@@ -420,8 +420,34 @@ def _clonar_agente_ia(inbox_id: str, inbox_origen: str, canal_nombre: str) -> No
         )
 
 
+def _resolver_inbox_origen(inbox_origen: str = "") -> str:
+    """Inbox del que se clona el `Agente IA` del canal nuevo.
+
+    POR QUÉ NO ES "5" FIJO (bug real, no hipotético): "5" es el WhatsApp de
+    lavendi.mx y solo existe en el sitio compartido. Cuando Estrublock conectó
+    su página el 2026-10-13, `conectar_pagina` llamó a `completar_wiring` con
+    ese default y `_clonar_agente_ia` murió con "no existe Agente IA origen
+    para clonar" (ver Error Log de `estrublock.lavendi.mx` de ese día) — el
+    inbox quedó creado pero sin agente, así que Sofía Ventas no habría
+    contestado hasta que alguien creara el registro a mano. Lo mismo pasaría en
+    cada cliente nuevo.
+
+    El origen correcto por sitio es su `default_inbox_id` (el WhatsApp de ese
+    cliente, que es de donde sale el prompt bueno). Se cae a "5" solo si el
+    sitio no lo tiene configurado, para no cambiar el comportamiento del sitio
+    compartido."""
+    inbox_origen = str(inbox_origen or "").strip()
+    if inbox_origen:
+        return inbox_origen
+    try:
+        default = frappe.db.get_single_value("Chatwoot Settings", "default_inbox_id")
+    except Exception:  # noqa: BLE001 — best-effort, igual que el resto del módulo
+        default = None
+    return str(default or "5").strip()
+
+
 @frappe.whitelist()
-def completar_wiring(inbox_id: str, inbox_origen: str = "5", canal_nombre: str = "") -> dict:
+def completar_wiring(inbox_id: str, inbox_origen: str = "", canal_nombre: str = "") -> dict:
     """Completa el wiring de un inbox ya creado en Chatwoot (pasos 2 y 3 del
     `runbook-conectar-redes.md`): agrega a `agente-ia@lavendi.mx` como
     colaborador del inbox (`_agregar_colaborador_inbox`) y clona el registro
@@ -455,7 +481,7 @@ def completar_wiring(inbox_id: str, inbox_origen: str = "5", canal_nombre: str =
     inbox_id = str(inbox_id or "").strip()
     if not inbox_id:
         frappe.throw("Falta inbox_id.")
-    inbox_origen = str(inbox_origen or "5").strip()
+    inbox_origen = _resolver_inbox_origen(inbox_origen)
 
     try:
         _agregar_canal_bandeja(inbox_id)
