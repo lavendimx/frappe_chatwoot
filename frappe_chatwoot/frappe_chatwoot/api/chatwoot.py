@@ -1513,4 +1513,9 @@ def adjunto(path: str, nombre: str = None):
     # `content_type` y `display_content_as`. Con "inline", el navegador la pinta en
     # el hilo en vez de bajarla al disco.
     frappe.local.response.type = "download"
-    frappe.local.response.display_content_as = "inline"
+    # "inline" solo tiene sentido si el navegador sabe pintar ese mimetype nativo
+    # (imagen/video/audio/PDF). Para DOC/DOCX y demás, forzarlo abre una pestaña en
+    # blanco en vez de nada — mejor que descargue, como espera el usuario.
+    tipos_visualizables = ("image/", "video/", "audio/", "application/pdf")
+    es_visualizable = (content_type or "").startswith(tipos_visualizables)
+    frappe.local.response.display_content_as = "inline" if es_visualizable else "attachment"
