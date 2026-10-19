@@ -83,6 +83,14 @@ def antes_de_la_peticion():
 
     # 1) Raiz del dominio -> bandeja con sesion, login sin ella. Nunca a /me.
     if path == "/" and _tiene_crm():
+        # Los POST a "/" no son navegacion: son el `frappe.call` del formulario
+        # de /login (entrar y "olvide mi contrasena"), que manda `cmd` en el
+        # cuerpo y espera JSON. Redirigirlos aqui se comia la peticion: la
+        # pantalla decia "Instructions Emailed" pero Frappe nunca generaba la
+        # llave ni encolaba el correo (hallazgo 2026-10-19, Ena no recibio su
+        # restablecimiento). El redirect aplica solo a GET.
+        if request.method == "POST":
+            return
         if frappe.session.user == "Guest":
             raise _RedirigirA("/login?redirect-to=/crm")
         raise _RedirigirA("/crm")
