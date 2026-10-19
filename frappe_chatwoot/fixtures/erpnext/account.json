@@ -1,0 +1,41 @@
+[
+ {
+  "doctype": "Account",
+  "name": "IVA Trasladado - LMX",
+  "account_name": "IVA Trasladado",
+  "parent_account": "Duties and Taxes - LMX",
+  "is_group": 0,
+  "company": "lavendi.mx",
+  "root_type": "Liability",
+  "report_type": "Balance Sheet",
+  "account_type": "Tax",
+  "account_currency": "MXN",
+  "disabled": 0
+ },
+ {
+  "doctype": "Account",
+  "name": "ISR Retenido - LMX",
+  "account_name": "ISR Retenido",
+  "parent_account": "Duties and Taxes - LMX",
+  "is_group": 0,
+  "company": "lavendi.mx",
+  "root_type": "Liability",
+  "report_type": "Balance Sheet",
+  "account_type": "Tax",
+  "account_currency": "MXN",
+  "disabled": 0
+ },
+ {
+  "doctype": "Account",
+  "name": "IVA Retenido - LMX",
+  "account_name": "IVA Retenido",
+  "parent_account": "Duties and Taxes - LMX",
+  "is_group": 0,
+  "company": "lavendi.mx",
+  "root_type": "Liability",
+  "report_type": "Balance Sheet",
+  "account_type": "Tax",
+  "account_currency": "MXN",
+  "disabled": 0
+ }
+]

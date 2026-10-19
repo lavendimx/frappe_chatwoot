@@ -1,0 +1,39 @@
+[
+ {
+  "doctype": "Sales Taxes and Charges Template",
+  "name": "Mexico Tax PM Retenciones - LMX",
+  "title": "Mexico Tax PM Retenciones",
+  "company": "lavendi.mx",
+  "is_default": 0,
+  "disabled": 0,
+  "taxes": [
+   {
+    "parent": "Mexico Tax PM Retenciones - LMX",
+    "parentfield": "taxes",
+    "parenttype": "Sales Taxes and Charges Template",
+    "charge_type": "On Net Total",
+    "account_head": "IVA Trasladado - LMX",
+    "description": "IVA trasladado (16%)",
+    "rate": 16.0
+   },
+   {
+    "parent": "Mexico Tax PM Retenciones - LMX",
+    "parentfield": "taxes",
+    "parenttype": "Sales Taxes and Charges Template",
+    "charge_type": "On Net Total",
+    "account_head": "ISR Retenido - LMX",
+    "description": "ISR retenido (10% sobre subtotal)",
+    "rate": -10.0
+   },
+   {
+    "parent": "Mexico Tax PM Retenciones - LMX",
+    "parentfield": "taxes",
+    "parenttype": "Sales Taxes and Charges Template",
+    "charge_type": "On Net Total",
+    "account_head": "IVA Retenido - LMX",
+    "description": "IVA retenido (2/3 del IVA trasladado)",
+    "rate": -10.6667
+   }
+  ]
+ }
+]
