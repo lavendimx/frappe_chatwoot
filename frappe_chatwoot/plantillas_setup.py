@@ -54,9 +54,9 @@ def crear():
             {"fieldname": "col_1", "fieldtype": "Column Break"},
             {"fieldname": "texto", "fieldtype": "Text", "label": "Mensaje"},
             {"fieldname": "adjunto", "fieldtype": "Data", "label": "Adjunto",
-             "description": "URL servible (/files/... o https). Las de GHL se "
-                            "rehospedaron en sofiav2.lavendi.mx/files/."},
-            {"fieldname": "ghl_id", "fieldtype": "Data", "label": "Id en GHL",
+             "description": "URL servible (/files/... o https). Las heredadas del CRM "
+                            "anterior se rehospedaron en sofiav2.lavendi.mx/files/."},
+            {"fieldname": "ghl_id", "fieldtype": "Data", "label": "ID de origen (migración)",
              "read_only": 1, "description": "Trazabilidad; la plantilla original muere "
                                             "con la subcuenta."},
         ],

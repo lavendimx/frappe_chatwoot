@@ -716,7 +716,7 @@
    "creation": "2026-09-14 15:22:44.496205",
    "default": null,
    "depends_on": null,
-   "description": "Se compara contra `ultimo_envio_at` para decidir la salida por respuesta (el `stopOnResponse` de GHL).",
+   "description": "Se compara contra `ultimo_envio_at` para decidir la salida por respuesta (el `stopOnResponse` del CRM anterior).",
    "docstatus": 0,
    "documentation_url": null,
    "fetch_from": null,

@@ -36,7 +36,7 @@ def run():
             "fieldtype": "Data",
             "insert_after": "nombre_ghl",
             "depends_on": "eval:['WhatsApp','Email'].includes(doc.tipo)",
-            "description": "Título que ve el equipo en el selector de plantillas del composer. Vacío = usa el nodo GHL.",
+            "description": "Título que ve el equipo en el selector de plantillas del composer. Vacío = usa el nombre del nodo de origen.",
         }).insert(ignore_permissions=True)
         print("creado: titulo_plantilla")
     else:

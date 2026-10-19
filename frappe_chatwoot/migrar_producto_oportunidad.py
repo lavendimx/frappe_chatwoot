@@ -36,7 +36,7 @@ CAMPO = {
     "fieldname": "ghl_producto",
     "fieldtype": "Data",
     "label": "Producto (oportunidad)",
-    "description": "PVP · SGPT · PWP · EGT. Viene del custom field de oportunidad de GHL; "
+    "description": "PVP · SGPT · PWP · EGT. Viene del custom field de oportunidad del CRM anterior; "
                    "es el que decide la rama de la secuencia de seguimiento.",
     "insert_after": "ghl_opp_name",
 }
