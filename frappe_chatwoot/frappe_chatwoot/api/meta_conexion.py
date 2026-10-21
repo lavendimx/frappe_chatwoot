@@ -103,19 +103,29 @@ def config() -> dict:
 
 @frappe.whitelist()
 def estado_mensajeria() -> dict:
-    """Indicador de solo lectura para el panel: qué páginas ya están conectadas
-    a Chatwoot para mensajería (Messenger e Instagram), sin iniciar ningún
-    login. Antes de esto, el panel solo mostraba "ya conectadas" después de
-    repetir el login de Facebook, y Instagram no tenía ningún indicador
-    aunque ya estuviera conectado (pendiente señalado en el CLAUDE.md del
-    proyecto, 2026-10-09).
+    """Indicador de solo lectura para el panel: qué páginas/números ya están
+    conectados a Chatwoot para mensajería (Messenger, Instagram y WhatsApp
+    Cloud API oficial), sin iniciar ningún login. Antes de esto, el panel solo
+    mostraba "ya conectadas" después de repetir el login de Facebook, y
+    Instagram no tenía ningún indicador aunque ya estuviera conectado
+    (pendiente señalado en el CLAUDE.md del proyecto, 2026-10-09).
 
     Aislamiento por sitio (bug corregido 2026-10-13): `list_inboxes()` devuelve
     TODA la cuenta COMPARTIDA de Chatwoot, así que sin filtrar el panel de un
     cliente mostraba como "Conectada" la página de OTRO (Estrublock veía los
     inboxes 12/22 de lavendi.mx). Se filtra contra `_inboxes_del_sitio()` —
     la misma fuente de verdad que Conversaciones usa para "Todos los canales"
-    (honra `canales_bandeja`; vacío = solo `default_inbox_id`)."""
+    (honra `canales_bandeja`; vacío = solo `default_inbox_id`).
+
+    `whatsapp_cloud` — agregado junto con `conectar_whatsapp_cloud()` (ver su
+    docstring). Se filtra por `channel_type == "Channel::Whatsapp"` Y
+    `provider == "whatsapp_cloud"` a propósito: los números WhatsApp que ya
+    existen hoy (los 4 de Estrublock vía Evolution) NO son `Channel::Whatsapp`
+    en Chatwoot — llegan como `Channel::Api` genérico a través del bridge —
+    así que no hay riesgo de que esta lista los mezcle o los duplique.
+    `channel_type`, `provider` y `phone_number` vienen siempre en
+    `GET /inboxes` (ver `_inbox.json.jbuilder` del contenedor de Chatwoot, sin
+    gating por rol de administrador para esos 3 campos)."""
     _exigir_admin()
     inboxes = cw.list_inboxes()
     sitio = set(_inboxes_del_sitio())
@@ -130,6 +140,13 @@ def estado_mensajeria() -> dict:
             {"id": i.get("id"), "name": i.get("name")}
             for i in inboxes
             if i.get("channel_type") == "Channel::Instagram"
+            and frappe.utils.cint(i.get("id")) in sitio
+        ],
+        "whatsapp_cloud": [
+            {"id": i.get("id"), "name": i.get("name"), "phone_number": i.get("phone_number")}
+            for i in inboxes
+            if i.get("channel_type") == "Channel::Whatsapp"
+            and i.get("provider") == "whatsapp_cloud"
             and frappe.utils.cint(i.get("id")) in sitio
         ],
     }
@@ -578,3 +595,110 @@ def autorizar_instagram() -> dict:
     if not url:
         frappe.throw("Chatwoot no devolvió la URL de autorización de Instagram.")
     return {"url": url}
+
+
+@frappe.whitelist()
+def conectar_whatsapp_cloud(
+    phone_number: str,
+    phone_number_id: str,
+    business_account_id: str,
+    access_token: str,
+    inbox_name: str = "",
+) -> dict:
+    """Conecta un número de WhatsApp Cloud API (oficial de Meta, Embedded
+    Signup NO incluido) a Chatwoot — investigado y construido 2026-10-19 para
+    el caso real de Estrublock (WABA `+1 555-322-1317`, hoy solo en GHL para
+    plantillas; ver `/srv/clientes/estrublock/migracionsgpt/planes/
+    readiness-migracion-estrublock.md` ítem 6 "Corte WABA" y
+    `runbook-waba-plan-b.md`).
+
+    POR QUÉ ES UN FORMULARIO (3 campos pegados a mano) Y NO UN BOTÓN DE LOGIN
+        El botón de Facebook de arriba (`conectar_pagina`) funciona sin pedir
+        nada a mano porque la app "Sofía CRM — lavendi.mx" (app_id
+        2347475169339308) ya tiene aprobados `pages_show_list`,
+        `pages_manage_metadata`, `pages_messaging`, `business_management`,
+        etc. (ver CLAUDE.md del proyecto, "Meta App Review — APROBADO",
+        6-oct-2026). El equivalente de un clic para WhatsApp es el "Embedded
+        Signup for WhatsApp" de Meta, que exige los permisos
+        `whatsapp_business_management` y `whatsapp_business_messaging` — NO
+        están en esa lista de aprobados. Pedirlos abriría una ronda NUEVA de
+        App Review (texto + video + revisión de Meta, mismo trámite ya vivido
+        para comentarios en octubre) antes de poder ofrecer un botón real de
+        auto-conexión. Este formulario NO depende de esa revisión: usa un
+        token de **system user** generado a mano en Meta Business Manager
+        (Business Manager > Usuarios del sistema), fuera del flujo OAuth de
+        esta app — mismo principio que ya usa `Meta Comentarios Settings`
+        para guardar un token generado por backend en vez de vía login.
+
+    QUÉ VALIDA CHATWOOT AL CREAR EL INBOX (no hay que revalidar aquí)
+        `Channel::Whatsapp#validate_provider_config?` (modelo nativo de
+        Chatwoot, contenedor `chatwoot-pabuvqyduzevxbwnrcf3rozs`) llama
+        `GET /{business_account_id}/message_templates` y, si cambia el
+        `phone_number_id`, también `GET /{business_account_id}/phone_numbers`
+        contra la Graph API real con el `access_token` dado — si cualquier
+        dato está mal, Chatwoot responde 422 "Invalid Credentials" y
+        `cw._post` lo propaga como `ChatwootAPIError` (mismo patrón que
+        cualquier otro error de este archivo; el frontend ya sabe mostrar
+        `e.messages[0]`). No se crea un inbox "roto" a medias.
+
+    POR QUÉ NO HAY UN DOCTYPE PROPIO guardando estos 3 datos
+        A diferencia de `Meta Comentarios Settings` (que vive FUERA de
+        Chatwoot por diseño — ver api/meta_comentarios.py), aquí Chatwoot YA
+        es el dueño de la verdad: los 3 datos quedan dentro de
+        `channel_whatsapp.provider_config`/`business_management_token` de
+        Chatwoot al crear el inbox. Duplicarlos en un doctype de Frappe sería
+        una copia sin fuente de verdad clara y un secreto más que proteger.
+
+    Reusa `completar_wiring()` igual que `conectar_pagina()` (Messenger):
+    agrega el inbox a `canales_bandeja`, avisa a `agente-ia`, suma a
+    `agente-ia@lavendi.mx` como colaborador del inbox y clona el `Agente IA`
+    del inbox por defecto del sitio — los 4 pasos son best-effort; si alguno
+    falla, el inbox ya quedó creado en Chatwoot (no se revierte), igual que
+    el resto de este archivo.
+
+    ⚠ NO EJECUTAR contra el número real de Estrublock sin haber desvinculado
+    antes la app de GHL de ese WABA (decisión #10 / runbook-waba-plan-b.md):
+    conectar el mismo número aquí mientras sigue atado a GHL puede causar
+    downtime o conflicto de webhook — ese paso es un gate de producción,
+    requiere doble confirmación de Alejandro, y es independiente de que este
+    código ya esté listo."""
+    _exigir_admin()
+    faltantes = [
+        nombre
+        for nombre, valor in (
+            ("phone_number", phone_number),
+            ("phone_number_id", phone_number_id),
+            ("business_account_id", business_account_id),
+            ("access_token", access_token),
+        )
+        if not (valor or "").strip()
+    ]
+    if faltantes:
+        frappe.throw(f"Faltan datos para conectar WhatsApp: {', '.join(faltantes)}")
+
+    nombre_inbox = (inbox_name or f"WhatsApp Oficial {phone_number.strip()}").strip()
+
+    inbox = cw._post(
+        "/inboxes",
+        {
+            "name": nombre_inbox,
+            "channel": {
+                "type": "whatsapp",
+                "phone_number": phone_number.strip(),
+                "provider": "whatsapp_cloud",
+                "provider_config": {
+                    "api_key": access_token.strip(),
+                    "phone_number_id": phone_number_id.strip(),
+                    "business_account_id": business_account_id.strip(),
+                },
+            },
+        },
+    ) or {}
+
+    inbox_id = inbox.get("id")
+    if inbox_id:
+        # inbox_origen se deja en su default (`_resolver_inbox_origen` cae al
+        # `default_inbox_id` del sitio) — mismo criterio que `conectar_pagina`.
+        completar_wiring(str(inbox_id), canal_nombre="WhatsApp")
+
+    return inbox
