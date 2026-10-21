@@ -41,6 +41,10 @@ scheduler_events = {
         "*/15 * * * *": [
             "frappe_chatwoot.utils.recordatorios.enviar_recordatorios",
         ],
+        # Aviso push al asesor 10 min antes (pedido de Irene, 2026-10-20).
+        "*/5 * * * *": [
+            "frappe_chatwoot.utils.avisos_cita.avisar",
+        ],
         # Motor de secuencias PVP — réplica de «4. Seguimientos» de GHL.
         # `avanzar()` sale en la primera línea si
         # `Chatwoot Settings.secuencias_activas` está en 0, así que registrar el
@@ -48,18 +52,17 @@ scheduler_events = {
         # `Secuencia.activa`. Habilitado por Alejandro el 2026-09-15 (WhatsApp
         # real a 28 deals).
         #
-        # Una corrida por hora dentro de la ventana laboral 12-18 L-V (7 al día),
-        # no una sola: con `Secuencia.max_por_corrida = 6` el tope real pasa de 6
-        # a 42 mensajes diarios, que es lo que hace falta para drenar un atraso
-        # sin mandar una ráfaga concentrada a la misma hora. Cambiado por
-        # Alejandro el 2026-09-17, junto con la inserción del checklist de compra
-        # como 2do seguimiento.
+        # Cada 3 minutos dentro de la ventana laboral 12-18 L-V (2026-10-19).
+        # Antes era 1×/hora y los pasos internos ("Esperar 1 min") dejaban a las
+        # inscripciones vencidas compitiendo por el turno en cada corrida: 44 de
+        # 61 atoradas. Con `max_por_corrida = 15` y el encadenamiento de pasos
+        # internos, la cola drena sin ráfaga concentrada.
         #
         # OJO: este valor es la fuente de verdad. `bench migrate` resincroniza
         # `Scheduled Job Type` desde aquí — editar solo la fila de la DB se
         # revierte al siguiente migrate (fue lo que pasó con el intento del
         # 2026-09-16 de moverlo a `0 12`, que nunca llegó a estar vivo).
-        "0 12-18 * * 1-5": [
+        "*/3 12-18 * * 1-5": [
             "frappe_chatwoot.utils.secuencias.avanzar",
         ],
         # Preparación de llamada v2 — reemplaza el script GHL de

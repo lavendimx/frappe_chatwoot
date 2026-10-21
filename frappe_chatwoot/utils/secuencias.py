@@ -160,6 +160,14 @@ DELAY_ENTRE_ENVIOS_SEG = (60, 120)
 # 14:00 murieron a los 300 s con el tope en 4 envíos + el delay anti-baneo.
 PRESUPUESTO_CORRIDA_SEG = 250
 
+# Encadenamiento de pasos internos (2026-10-19). El job corre cada 3 min desde
+# esta fecha, pero antes corría 1×/hora: un "Esperar 1 min" dejaba la
+# inscripción vencida y la devolvía a la cola en cada corrida. Con esto, los
+# pasos internos con espera corta se ejecutan en la MISMA corrida, hasta el
+# primer envío real (el freno es del canal) o una espera larga de verdad.
+MAX_PASOS_INTERNOS_SEGUIDOS = 20
+ESPERA_INTERNA_MAX_MIN = 60
+
 # Estados de `CRM Deal.ghl_status` que sacan de la secuencia. Un deal ganado o
 # perdido no debe seguir recibiendo mensajes de venta — en GHL lo hacía el
 # workflow «8. Salida por Venta Ganada».
@@ -853,6 +861,20 @@ def _html_seguro(html: str) -> str:
     return html.replace(_URL_AGENDA_GHL, _URL_AGENDA_PROPIA)
 
 
+def _nombre_deal(deal: str) -> str:
+    """Nombre visible de la oportunidad para textos de aviso.
+
+    Nunca el folio: `CRM-DEAL-2026-00082` no dice nada en una notificación.
+    Degrada a organización y, si tampoco hay, al folio."""
+    try:
+        row = frappe.db.get_value(
+            "CRM Deal", deal, ["deal_name", "organization"], as_dict=True
+        )
+        return (row and (row.deal_name or row.organization)) or deal
+    except Exception:
+        return deal
+
+
 def _avisar_respondio(ins: dict) -> None:
     """Avisa que un prospecto en seguimiento automático volvió a escribir.
 
@@ -867,7 +889,7 @@ def _avisar_respondio(ins: dict) -> None:
     inscripción."""
     try:
         deal_owner = frappe.db.get_value("CRM Deal", ins["deal"], "deal_owner")
-        mensaje = (f"{ins['deal']} respondió a un mensaje de seguimiento automático "
+        mensaje = (f"{_nombre_deal(ins['deal'])} respondió a un mensaje de seguimiento automático "
                    "— revisar la conversación.")
         frappe.get_doc({
             "doctype": "CRM Notification",
@@ -898,7 +920,7 @@ def _avisar_omitido(ins: dict, paso: dict, nota: str) -> None:
     debe bloquear el avance del paso."""
     try:
         deal_owner = frappe.db.get_value("CRM Deal", ins["deal"], "deal_owner")
-        mensaje = (f"{ins['deal']}: paso de {paso.get('tipo')} omitido en seguimiento "
+        mensaje = (f"{_nombre_deal(ins['deal'])}: paso de {paso.get('tipo')} omitido en seguimiento "
                    f"automático — {nota}. Revisar el correo/teléfono del contacto.")
         frappe.get_doc({
             "doctype": "CRM Notification",
@@ -1251,6 +1273,10 @@ def avanzar():
         if not _dentro_de_ventana(sec, ahora):
             frappe.db.set_value("Secuencia Inscripcion", ins.name, "proximo_en",
                                 _siguiente_hueco(sec, ahora), update_modified=False)
+            # Commit por rama (2026-10-19): antes una excepción posterior en la
+            # corrida revertía TODAS las posposiciones, y el job reportaba
+            # "Complete" sin haber escrito nada.
+            frappe.db.commit()
             pospuestos += 1
             continue
 
@@ -1259,6 +1285,7 @@ def avanzar():
             frappe.db.set_value("Secuencia Inscripcion", ins.name, "proximo_en",
                                 frappe.utils.add_to_date(ahora, minutes=30),
                                 update_modified=False)
+            frappe.db.commit()
             pospuestos += 1
             continue
         if motivo == "__esperar_humano__":
@@ -1269,6 +1296,7 @@ def avanzar():
                 _siguiente_hueco(sec, frappe.utils.add_to_date(
                     ahora, hours=ESPERA_TRAS_RESPUESTA_HORAS)),
                 update_modified=False)
+            frappe.db.commit()
             pospuestos += 1
             continue
         if motivo:
@@ -1276,84 +1304,96 @@ def avanzar():
                 "estado": "Salió por cambio de etapa",
                 "motivo": motivo,
             }, update_modified=False)
+            frappe.db.commit()
             salidas.append((ins.name, motivo))
             continue
 
         pasos = sec.get("pasos") or []
         siguiente = ins.paso_actual  # base 0 sobre la lista = "el que sigue"
-        if siguiente >= len(pasos):
-            _set_ins(ins.name, {
-                "estado": "Terminada", "motivo": "secuencia completa",
-            }, update_modified=False)
-            continue
 
-        paso = pasos[siguiente]
-        paso = paso if isinstance(paso, dict) else paso.as_dict()
-
-        es_envio = paso.get("tipo") in ("WhatsApp", "Email")
-        # El freno es del CANAL, no del motor: solo frena ENVÍOS. Los pasos
-        # internos (Actualizar oportunidad / Esperar / Ventana de tiempo
-        # laboral) siempre avanzan, sin gastar plaza de ráfaga — antes el tope
-        # cortaba el ciclo completo y dejaba a los que sí mandan mensaje sin
-        # turno (medido 2026-09-22: 2/hora agotadas en pasos internos, 26
-        # vencidas sin salir).
-        if es_envio and tope and sec.setdefault("_hechos", 0) >= tope:
-            continue
-
-        # Delay de ráfaga: solo antes de un WhatsApp real, y solo si ya salió
-        # al menos uno en esta corrida — el primer envío nunca espera.
-        if paso.get("tipo") == "WhatsApp" and envios_whatsapp_en_corrida > 0:
-            # No empezar un delay que ya no cabe en el presupuesto: si se
-            # arrancara, la corrida moriría por timeout durante el sleep.
-            if (time.monotonic() - inicio_corrida
-                    > PRESUPUESTO_CORRIDA_SEG - DELAY_ENTRE_ENVIOS_SEG[1]):
+        for _cadena in range(MAX_PASOS_INTERNOS_SEGUIDOS):
+            if siguiente >= len(pasos):
+                _set_ins(ins.name, {
+                    "estado": "Terminada", "motivo": "secuencia completa",
+                }, update_modified=False)
+                frappe.db.commit()
                 break
-            time.sleep(random.uniform(*DELAY_ENTRE_ENVIOS_SEG))
 
-        try:
-            nota = _ejecutar_paso(dict(ins), paso, sec)
-        except Exception as exc:
-            _set_ins(ins.name, {
-                "estado": "Error", "motivo": f"paso {siguiente + 1}: {exc}"[:500],
-            }, update_modified=False)
-            frappe.log_error(f"secuencia {ins.name} paso {siguiente + 1}: {exc}", "Secuencias")
-            continue
+            paso = pasos[siguiente]
+            paso = paso if isinstance(paso, dict) else paso.as_dict()
 
-        # Un paso de envío que se saltó por falta de canal NO es un envío: no
-        # consume cupo de ráfaga, no gasta el delay anti-baneo y —sobre todo—
-        # no mueve `ultimo_envio_at`. Ver `_fue_omitido`.
-        omitido = es_envio and _fue_omitido(nota)
-        if omitido:
-            frappe.log_error(
-                f"secuencia {ins.name} paso {siguiente + 1} ({paso.get('tipo')}): {nota}",
-                "Secuencias — paso omitido sin canal",
-            )
-            _avisar_omitido(dict(ins), paso, nota)
+            es_envio = paso.get("tipo") in ("WhatsApp", "Email")
+            # El freno es del CANAL, no del motor: solo frena ENVÍOS. Los pasos
+            # internos (Actualizar oportunidad / Esperar / Ventana de tiempo
+            # laboral) siempre avanzan, sin gastar plaza de ráfaga — antes el tope
+            # cortaba el ciclo completo y dejaba a los que sí mandan mensaje sin
+            # turno (medido 2026-09-22: 2/hora agotadas en pasos internos, 26
+            # vencidas sin salir).
+            if es_envio and tope and sec.setdefault("_hechos", 0) >= tope:
+                break
 
-        if paso.get("tipo") == "WhatsApp" and not omitido:
-            envios_whatsapp_en_corrida += 1
+            # Delay de ráfaga: solo antes de un WhatsApp real, y solo si ya salió
+            # al menos uno en esta corrida — el primer envío nunca espera.
+            if paso.get("tipo") == "WhatsApp" and envios_whatsapp_en_corrida > 0:
+                # No empezar un delay que ya no cabe en el presupuesto: si se
+                # arrancara, la corrida moriría por timeout durante el sleep.
+                if (time.monotonic() - inicio_corrida
+                        > PRESUPUESTO_CORRIDA_SEG - DELAY_ENTRE_ENVIOS_SEG[1]):
+                    break
+                time.sleep(random.uniform(*DELAY_ENTRE_ENVIOS_SEG))
 
-        espera = frappe.utils.cint(paso.get("espera_minutos"))
-        proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(ahora, minutes=espera or 1))
-        cambios = {"paso_actual": siguiente + 1, "proximo_en": proximo}
-        if es_envio and not omitido:
-            cambios["ultimo_envio_at"] = ahora
-        _set_ins(ins.name, cambios, update_modified=False)
-        # Commit por paso (2026-09-22): antes se commiteaba una sola vez al final
-        # de la corrida. Una corrida que moría a medias (timeout, cuelgue de red)
-        # dejaba mensajes YA enviados sin avanzar `paso_actual`, y la siguiente
-        # los repetía (ODM Express 17-sep, Gabriela Isaís 4-sep). Con el commit
-        # aquí, el envío y su avance van juntos: o quedan los dos, o ninguno.
-        frappe.db.commit()
+            try:
+                nota = _ejecutar_paso(dict(ins), paso, sec)
+            except Exception as exc:
+                _set_ins(ins.name, {
+                    "estado": "Error", "motivo": f"paso {siguiente + 1}: {exc}"[:500],
+                }, update_modified=False)
+                frappe.log_error(f"secuencia {ins.name} paso {siguiente + 1}: {exc}", "Secuencias")
+                frappe.db.commit()
+                break
 
-        # El freno de ráfaga es del CANAL, no del motor: solo un envío real
-        # consume cupo. Antes contaba TODO paso — un "Actualizar oportunidad" o
-        # un "Esperar" gastaban plaza y dejaban sin turno a los que sí mandan
-        # mensaje (medido 2026-09-22: las 2 plazas/hora se agotaron en pasos
-        # internos y 26 vencidas nunca salieron).
-        if es_envio and not omitido:
-            sec["_hechos"] = sec.get("_hechos", 0) + 1
-        hechos.append((ins.name, siguiente + 1, nota))
+            # Un paso de envío que se saltó por falta de canal NO es un envío: no
+            # consume cupo de ráfaga, no gasta el delay anti-baneo y —sobre todo—
+            # no mueve `ultimo_envio_at`. Ver `_fue_omitido`.
+            omitido = es_envio and _fue_omitido(nota)
+            if omitido:
+                frappe.log_error(
+                    f"secuencia {ins.name} paso {siguiente + 1} ({paso.get('tipo')}): {nota}",
+                    "Secuencias — paso omitido sin canal",
+                )
+                _avisar_omitido(dict(ins), paso, nota)
+
+            if paso.get("tipo") == "WhatsApp" and not omitido:
+                envios_whatsapp_en_corrida += 1
+
+            espera = frappe.utils.cint(paso.get("espera_minutos"))
+            proximo = _siguiente_hueco(sec, frappe.utils.add_to_date(ahora, minutes=espera or 1))
+            cambios = {"paso_actual": siguiente + 1, "proximo_en": proximo}
+            if es_envio and not omitido:
+                cambios["ultimo_envio_at"] = ahora
+            _set_ins(ins.name, cambios, update_modified=False)
+            # Commit por paso (2026-09-22): antes se commiteaba una sola vez al final
+            # de la corrida. Una corrida que moría a medias (timeout, cuelgue de red)
+            # dejaba mensajes YA enviados sin avanzar `paso_actual`, y la siguiente
+            # los repetía (ODM Express 17-sep, Gabriela Isaís 4-sep). Con el commit
+            # aquí, el envío y su avance van juntos: o quedan los dos, o ninguno.
+            frappe.db.commit()
+
+            # El freno de ráfaga es del CANAL, no del motor: solo un envío real
+            # consume cupo. Antes contaba TODO paso — un "Actualizar oportunidad" o
+            # un "Esperar" gastaban plaza y dejaban sin turno a los que sí mandan
+            # mensaje (medido 2026-09-22: las 2 plazas/hora se agotaron en pasos
+            # internos y 26 vencidas nunca salieron).
+            if es_envio and not omitido:
+                sec["_hechos"] = sec.get("_hechos", 0) + 1
+            hechos.append((ins.name, siguiente + 1, nota))
+            siguiente += 1
+
+            # Un envío real cierra el turno de esta inscripción (el freno es del
+            # canal y el delay anti-baneo ya se pagó). Una espera larga también:
+            # es una pausa de negocio, no un paso interno que se pueda encadenar.
+            if es_envio or espera > ESPERA_INTERNA_MAX_MIN:
+                break
 
     frappe.db.commit()
     return {"activo": True, "ejecutados": len(hechos), "salidas": len(salidas),
