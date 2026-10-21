@@ -60,6 +60,7 @@ def _plantillas_virtuales(categoria=None):
                 "categoria": sec_categoria,
                 "texto": paso.mensaje,
                 "adjunto": paso.adjunto_url,
+                "activa": 1,
             })
     return virtuales
 
@@ -82,7 +83,7 @@ def listar(categoria=None, q=None, canal="WhatsApp"):
         "Plantilla",
         filters=filtros,
         or_filters=or_filters,
-        fields=["name", "titulo", "categoria", "texto", "adjunto"],
+        fields=["name", "titulo", "categoria", "texto", "adjunto", "activa"],
         order_by="categoria asc, titulo asc",
         limit_page_length=0,
     )
