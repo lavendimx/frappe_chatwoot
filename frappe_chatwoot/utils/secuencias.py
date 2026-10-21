@@ -946,19 +946,67 @@ def _detalle_paso(ins: dict, paso: dict, sec: dict) -> str:
     return f"{detalle} ({etiqueta})" if etiqueta else detalle
 
 
+def contenido_paso(paso: dict) -> tuple[str, str, str, str | None, str]:
+    """Contenido efectivo del paso, resolviendo la **plantilla vinculada**.
+
+    Devuelve `(mensaje, asunto, html, adjunto_url, error)`. Si `error` no está
+    vacío, el paso debe OMITIRSE: la plantilla ya no existe, está apagada o es
+    de otro canal. Fail-closed a propósito (2026-10-20): mandar el texto inline
+    viejo o el de otro canal sería peor que omitir y dejar la nota en la traza.
+
+    Sin `plantilla`, devuelve los campos inline de siempre — los pasos viejos
+    no cambian de comportamiento.
+    """
+    tipo = paso.get("tipo")
+    nombre = (paso.get("plantilla") or "").strip()
+    if nombre:
+        p = frappe.db.get_value(
+            "Plantilla", nombre,
+            ["titulo", "canal", "activa", "texto", "adjunto"], as_dict=True,
+        )
+        if not p:
+            return "", "", "", None, f"la plantilla {nombre} ya no existe"
+        if not p.get("activa"):
+            return "", "", "", None, f"la plantilla {p.get('titulo') or nombre} está apagada"
+        canal = "Email" if tipo == "Email" else "WhatsApp"
+        if (p.get("canal") or "") != canal:
+            return ("", "", "", None,
+                    f"la plantilla {p.get('titulo') or nombre} es de {p.get('canal')}, "
+                    f"no de {canal}")
+        texto = p.get("texto") or ""
+        return (
+            texto,
+            paso.get("asunto") or p.get("titulo") or "",
+            texto,
+            p.get("adjunto") or paso.get("adjunto_url"),
+            "",
+        )
+    return (
+        paso.get("mensaje") or "",
+        paso.get("asunto") or "",
+        paso.get("html") or paso.get("mensaje") or "",
+        paso.get("adjunto_url"),
+        "",
+    )
+
+
 def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
     """Corre un paso. Devuelve una nota corta para la traza."""
     tipo = paso.get("tipo")
     ctx = _contexto(ins)
+    mensaje, asunto_paso, html_paso, adjunto_url, error_contenido = contenido_paso(paso)
 
     if tipo == "Esperar":
         return "espera"
 
+    if tipo in ("WhatsApp", "Email") and error_contenido:
+        return f"{tipo.lower()} omitido ({error_contenido})"
+
     if tipo == "WhatsApp":
-        cuerpo = _resolver(paso.get("mensaje"), ctx)
+        cuerpo = _resolver(mensaje, ctx)
         nota_adjunto = ""
         adjunto = None
-        if paso.get("adjunto_url"):
+        if adjunto_url:
             # El adjunto va como ARCHIVO real (multipart), no como URL pegada
             # al texto: con URL el cliente ve un enlace en vez de la imagen
             # (verificado en producción el 14-sep-2026: el mensaje de prueba
@@ -966,7 +1014,7 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
             # adjuntos). La URL de GHL nunca se manda cruda — ver
             # `_adjunto_seguro` (punto 8 del docstring): esa subcuenta ya está
             # apagada y esos links devuelven 404 hoy.
-            rehospedado = _adjunto_seguro(paso["adjunto_url"])
+            rehospedado = _adjunto_seguro(adjunto_url)
             if rehospedado:
                 adjunto = _leer_adjunto(rehospedado)
             if not adjunto:
@@ -999,8 +1047,8 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
             # Saltar es correcto; abortar dejaría la secuencia atorada para siempre.
             return "email omitido (contacto sin correo)"
 
-        asunto = _resolver(paso.get("asunto"), ctx) or "lavendi.mx"
-        html = _html_seguro(_resolver(paso.get("html") or paso.get("mensaje"), ctx))
+        asunto = _resolver(asunto_paso, ctx) or "lavendi.mx"
+        html = _html_seguro(_resolver(html_paso, ctx))
 
         # El paso Email puede llevar adjunto real, igual que el de WhatsApp (18-sep,
         # a petición de Alejandro para el checklist del 2do seguimiento PVP): el PDF
@@ -1011,8 +1059,8 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
         # porque el enlace ya va en el HTML. Omitir el correo entero por un archivo
         # ilegible sería peor que mandarlo con un adjunto de menos.
         adjuntos, nota_adjunto = None, ""
-        if paso.get("adjunto_url"):
-            rehospedado = _adjunto_seguro(paso["adjunto_url"])
+        if adjunto_url:
+            rehospedado = _adjunto_seguro(adjunto_url)
             leido = _leer_adjunto(rehospedado) if rehospedado else None
             if leido:
                 import base64
@@ -1054,7 +1102,7 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
 
     if tipo == "Nota interna":
         cw.create_message(int(ins["conversation_id"]),
-                          _resolver(paso.get("mensaje"), ctx), private=True)
+                          _resolver(mensaje, ctx), private=True)
         return "nota interna"
 
     if tipo == "Aviso al equipo":
@@ -1064,21 +1112,21 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
             "to_user": frappe.db.get_value("CRM Deal", ins["deal"], "deal_owner")
                        or frappe.session.user,
             "type": "Mention",
-            "message": _resolver(paso.get("mensaje"), ctx),
-            "notification_text": _resolver(paso.get("mensaje"), ctx),
+            "message": _resolver(mensaje, ctx),
+            "notification_text": _resolver(mensaje, ctx),
             "reference_doctype": "CRM Deal",
             "reference_name": ins["deal"],
         }).insert(ignore_permissions=True)
         return "aviso al equipo"
 
     if tipo == "Tarea":
-        titulo = (_resolver(paso.get("asunto"), ctx).strip()
-                  or _resolver(paso.get("mensaje"), ctx)[:140].strip()
+        titulo = (_resolver(asunto_paso, ctx).strip()
+                  or _resolver(mensaje, ctx)[:140].strip()
                   or "Seguimiento")
         frappe.get_doc({
             "doctype": "CRM Task",
             "title": titulo[:140],
-            "description": _resolver(paso.get("mensaje"), ctx),
+            "description": _resolver(mensaje, ctx),
             "reference_doctype": "CRM Deal",
             "reference_docname": ins["deal"],
             # "Todo", no "Backlog": mismo patrón que ya usa el resto del
@@ -1457,17 +1505,27 @@ def listar_inscripciones(secuencia: str | None = None, estado: str | None = None
     for ins in filas:
         sec_name = ins["secuencia"]
         if sec_name not in pasos_por_sec:
+            # `plantilla` es un campo nuevo: un sitio que todavía no migra no
+            # debe romper la pantalla (el job y este listado comparten código).
+            campos_paso = ["idx", "tipo", "nombre_ghl", "titulo_plantilla"]
+            if frappe.get_meta("Secuencia Paso").has_field("plantilla"):
+                campos_paso.append("plantilla")
             pasos_por_sec[sec_name] = frappe.get_all(
                 "Secuencia Paso", filters={"parent": sec_name},
-                fields=["idx", "tipo", "nombre_ghl"], order_by="idx asc",
-                limit_page_length=0,
+                fields=campos_paso, order_by="idx asc", limit_page_length=0,
             )
         pasos = pasos_por_sec[sec_name]
         i = frappe.utils.cint(ins["paso_actual"])
         ins["total_pasos"] = len(pasos)
         if i < len(pasos):
             p = pasos[i]
-            ins["siguiente_paso"] = p.get("nombre_ghl") or p.get("tipo")
+            # Si el paso apunta a una plantilla del catálogo, el humano reconoce
+            # mejor el título de la plantilla que el nombre del nodo de GHL.
+            titulo_plantilla = None
+            if p.get("plantilla"):
+                titulo_plantilla = frappe.db.get_value("Plantilla", p["plantilla"], "titulo")
+            ins["siguiente_paso"] = (titulo_plantilla or p.get("titulo_plantilla")
+                                     or p.get("nombre_ghl") or p.get("tipo"))
             ins["siguiente_tipo"] = p.get("tipo")
         else:
             ins["siguiente_paso"] = "Completada"
@@ -1489,8 +1547,12 @@ def listar_inscripciones(secuencia: str | None = None, estado: str | None = None
         s["total_pasos"] = pasos_total.get(s["name"], 0)
         s["inscritos"] = activos.get(s["name"], 0)
 
+    roles = frappe.get_roles(frappe.session.user)
+    puede_editar = (frappe.session.user == "Administrator"
+                    or any(r in roles for r in _ROLES_EDICION))
     return {
         "motor_activo": _activo(),
+        "puede_editar": puede_editar,
         "secuencias": secuencias,
         "inscripciones": filas,
     }

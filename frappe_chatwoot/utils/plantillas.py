@@ -38,13 +38,20 @@ def _plantillas_virtuales(categoria=None):
         sec_categoria = sec.producto or "PVP"
         if categoria and categoria != sec_categoria:
             continue
+        campos = ["idx", "titulo_plantilla", "nombre_ghl", "mensaje", "adjunto_url"]
+        if frappe.get_meta("Secuencia Paso").has_field("plantilla"):
+            campos.append("plantilla")
         pasos = frappe.get_all(
             "Secuencia Paso",
             filters={"parent": sec.name, "parenttype": "Secuencia", "tipo": "WhatsApp"},
-            fields=["idx", "titulo_plantilla", "nombre_ghl", "mensaje", "adjunto_url"],
-            order_by="idx asc",
+            fields=campos, order_by="idx asc",
         )
         for paso in pasos:
+            # Si el paso ya apunta a una Plantilla real, esa fila ya viene del
+            # catálogo (`reales`): sintetizarla otra vez la duplicaría en el
+            # selector. La virtual queda solo para los pasos con texto inline.
+            if paso.get("plantilla"):
+                continue
             if not paso.mensaje:
                 continue
             virtuales.append({
