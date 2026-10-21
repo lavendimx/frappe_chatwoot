@@ -41,7 +41,7 @@ TIPOS_ENVIO = ("WhatsApp", "Email")
 
 
 def _exigir_lectura():
-    plan.exigir_no_lite()
+    plan.exigir_secuencias()
 
 
 def _exigir_edicion():

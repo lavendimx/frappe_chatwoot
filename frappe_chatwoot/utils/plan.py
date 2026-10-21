@@ -82,9 +82,21 @@ def exigir_plan_minimo(minimo, mensaje=None, user=None):
 
 
 def exigir_no_lite(mensaje=None):
-    """Secuencias, Campañas de email, Agente IA (config), Cobranza — todo lo
-    que Lite no incluye pero Pro y Enterprise sí."""
+    """Campañas de email, Agente IA (config), Cobranza — todo lo que Lite no
+    incluye pero Pro y Enterprise sí.
+
+    Las Secuencias salieron de esta lista el 2026-10-21 (decisión de Alejandro):
+    usan `exigir_secuencias()`, que sí las abre en Lite."""
     exigir_plan_minimo("pro", mensaje)
+
+
+def exigir_secuencias(mensaje=None):
+    """Secuencias e inscripciones: incluidas desde Lite (2026-10-21).
+
+    El mínimo es `lite`, no `gratuito`: un sitio gratuito no tiene agente ni
+    inbox, así que una secuencia no tendría por dónde enviar; se mantiene el
+    fail-closed de `NIVELES`."""
+    exigir_plan_minimo("lite", mensaje)
 
 
 def exigir_enterprise(mensaje=None):
@@ -166,6 +178,12 @@ def _condicion_nivel(minimo, user):
     return ""
 
 
+def condicion_lista_secuencias(user):
+    """Para `permission_query_conditions` de Secuencia/Inscripcion: sin filas
+    solo en plan Gratuito (Lite ya las incluye, 2026-10-21)."""
+    return _condicion_nivel("lite", user)
+
+
 def condicion_lista_no_lite(user):
     """Para `permission_query_conditions`: sin filas si el sitio es Lite y el
     usuario no es de agencia. "" (sin restricción) en cualquier otro caso."""
@@ -184,6 +202,11 @@ def _permiso_doc(minimo, doc, ptype=None, user=None):
     if _nivel_index(plan_de_este_sitio()) < _nivel_index(minimo):
         return False
     return None
+
+
+def permiso_doc_secuencias(doc, ptype=None, user=None):
+    """Para `has_permission` de Secuencia/Inscripcion: deniega solo en Gratuito."""
+    return _permiso_doc("lite", doc, ptype, user)
 
 
 def permiso_doc_no_lite(doc, ptype=None, user=None):

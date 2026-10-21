@@ -292,8 +292,8 @@ doc_events = {
 # instalado, así que estos hooks son inertes ahí — pero si algún día se
 # instala por error, el gate ya está puesto.
 permission_query_conditions = {
-    "Secuencia": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
-    "Secuencia Inscripcion": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
+    "Secuencia": "frappe_chatwoot.utils.plan.condicion_lista_secuencias",
+    "Secuencia Inscripcion": "frappe_chatwoot.utils.plan.condicion_lista_secuencias",
     "Campana Email": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
     "Campana Email Paso": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
     "Agente IA": "frappe_chatwoot.utils.plan.condicion_lista_no_lite",
@@ -303,8 +303,8 @@ permission_query_conditions = {
 }
 
 has_permission = {
-    "Secuencia": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
-    "Secuencia Inscripcion": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
+    "Secuencia": "frappe_chatwoot.utils.plan.permiso_doc_secuencias",
+    "Secuencia Inscripcion": "frappe_chatwoot.utils.plan.permiso_doc_secuencias",
     "Campana Email": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
     "Campana Email Paso": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
     "Agente IA": "frappe_chatwoot.utils.plan.permiso_doc_no_lite",
