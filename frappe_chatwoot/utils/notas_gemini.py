@@ -11,7 +11,8 @@ host↔contenedor** que `planeacion_llamadas` (`Chatwoot Settings.agenda_url` +
     si no existe, por el contacto (email/nombre) → Deal/Lead más reciente;
   - publica una `FCRM Note` "Resumen — <fecha>" con el resumen;
   - deja un `Comment` corto con el link del Doc para el timeline;
-  - crea una `CRM Task` por cada próximo paso sugerido;
+  - crea **una** `CRM Task` por videollamada, con los próximos pasos como
+    checklist en la descripción (antes: una tarea por paso, ver `_crear_tarea`);
   - si había fila de `Reunion Agendada`, guarda `notas_gemini_url/_msg_id/_at`.
 
 Idempotencia: doctype `Chatwoot Notas Gemini` (msg_id unique). Piso de fecha
@@ -234,21 +235,60 @@ def _publicar_comentario(ficha_doctype, ficha_name, doc_url):
     }).insert(ignore_permissions=True)
 
 
-def _crear_tarea(paso, ficha_doctype, ficha_name, assigned_to, doc_url):
-    if isinstance(paso, dict):
-        titulo = str(paso.get("titulo") or "").strip()
-        desc = str(paso.get("descripcion") or "").strip()
-        resp = str(paso.get("responsable") or "").strip()
-    else:
-        titulo, desc, resp = str(paso).strip(), "", ""
-    detalle = " ".join(x for x in (
-        f"Responsable: {resp}." if resp else "",
-        desc,
+def _crear_tarea(pasos, ficha_doctype, ficha_name, assigned_to, doc_url, fecha=None):
+    """Una sola `CRM Task` por videollamada, con los próximos pasos como checklist.
+
+    Antes se creaba una tarea por cada paso sugerido por Gemini: una junta de 45
+    min podía dejar 5-6 tareas sueltas en el embudo, todas apuntando a la misma
+    ficha, y el equipo las percibía como ruido (Alejandro, 2026-10-20). La tarea
+    es el recordatorio de "dar seguimiento a esta llamada"; el detalle de qué
+    hacer vive dentro, no como tareas independientes.
+    """
+    pasos = [p for p in (pasos or []) if p]
+    if not pasos:
+        return
+
+    normalizados = []
+    for paso in pasos:
+        if isinstance(paso, dict):
+            normalizados.append({
+                "titulo": str(paso.get("titulo") or "").strip(),
+                "descripcion": str(paso.get("descripcion") or "").strip(),
+                "responsable": str(paso.get("responsable") or "").strip(),
+            })
+        else:
+            normalizados.append({"titulo": str(paso).strip(), "descripcion": "", "responsable": ""})
+    normalizados = [p for p in normalizados if p["titulo"] or p["descripcion"]]
+    if not normalizados:
+        return
+
+    lineas = []
+    for p in normalizados:
+        texto = p["titulo"] or p["descripcion"]
+        if p["descripcion"] and p["descripcion"] != p["titulo"]:
+            texto += f" — {p['descripcion']}"
+        if p["responsable"]:
+            texto += f" (responsable: {p['responsable']})"
+        lineas.append(f"- {texto}")
+
+    detalle = "\n".join(x for x in (
+        f"Próximos pasos de la videollamada ({_fecha_corta(fecha)}):",
+        "",
+        "\n".join(lineas),
+        "",
         f"Documento: {doc_url}" if doc_url else "",
-    ) if x) or "Próximo paso sugerido por Gemini."
+    ) if x is not None).strip()
+
+    # Con un solo paso, el título de la tarea es ese paso (más accionable en la
+    # lista); con varios, uno genérico fechado.
+    if len(normalizados) == 1:
+        titulo = normalizados[0]["titulo"] or "Próximo paso de la videollamada"
+    else:
+        titulo = f"Próximos pasos de la videollamada — {_fecha_corta(fecha)}"
+
     tarea = {
         "doctype": "CRM Task",
-        "title": (titulo or "Próximo paso de la videollamada")[:140],
+        "title": titulo[:140],
         "description": detalle,
         "status": "Todo",
         "priority": "Medium",
@@ -318,8 +358,7 @@ def generar_notas_gemini(dry_run=0, desde=None):
                 _publicar_comentario(ficha_doctype, ficha_name, doc_url)
 
             assigned = _owner_ficha(ficha_doctype, ficha_name)
-            for paso in pasos:
-                _crear_tarea(paso, ficha_doctype, ficha_name, assigned, doc_url)
+            _crear_tarea(pasos, ficha_doctype, ficha_name, assigned, doc_url, fecha)
 
             if reunion:
                 frappe.db.set_value(
