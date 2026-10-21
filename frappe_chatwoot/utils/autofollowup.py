@@ -418,6 +418,53 @@ def _tiene_disponibilidad_cerrada(conversation_id) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Guard "hilo de cobranza" (2026-10-19)
+# ---------------------------------------------------------------------------
+#
+# Origen: caso Alma Cabello (Casas Riscos, conversación 77, inbox 5). Perla
+# (cobranza saliente) mandó el recordatorio de una factura vencida y el motor
+# de autofollowup tomó el hilo como "prospecto en visto": mandó los pasos 1 y 2
+# ("¿al final pudieron hacer el pago?", "sigo al pendiente de tu comprobante"),
+# que se leyeron como insistencia sobre una clienta que ya había dicho cuándo
+# iba a pagar. No es un prospecto que reactivar: es cobranza en curso.
+#
+# Se detecta por CONTENIDO del hilo (no por deal ni por etiqueta) porque el
+# recordatorio de Perla sale por el mismo inbox y el mismo contacto puede no
+# tener deal ligado. Fail-closed invertido: ante error de red se asume que NO
+# es cobranza (False), igual que _tiene_disponibilidad_cerrada — se reintenta
+# en el siguiente barrido.
+PATRONES_COBRANZA = [
+    re.compile(r"\ble escribe\s+\*?perla\b", re.IGNORECASE),
+    re.compile(r"\brecordatorio de (?:su|tu|la) factura\b", re.IGNORECASE),
+    re.compile(r"\bsaldo total pendiente\b", re.IGNORECASE),
+    re.compile(r"\bfacturas?\b[^.\n]{0,40}\bvencid", re.IGNORECASE),
+    re.compile(r"\bcomprobante\b[^.\n]{0,40}\b(?:pago|factura|transferencia)\b", re.IGNORECASE),
+    re.compile(r"\b(?:pago|factura|transferencia)\b[^.\n]{0,40}\bcomprobante\b", re.IGNORECASE),
+]
+
+
+def _es_hilo_cobranza(conversation_id) -> bool:
+    """¿La conversación es un hilo de cobranza/comprobante? Si sí, el
+    autofollowup no debe "reactivarla" — el seguimiento lo lleva cobranza y/o
+    un humano, y repetir el recordatorio se lee como insistencia."""
+    if not conversation_id:
+        return False
+    try:
+        pagina = chatwoot_client.list_messages(conversation_id)
+    except Exception as e:
+        frappe.log_error(title="autofollowup._es_hilo_cobranza", message=str(e))
+        return False
+    mensajes = (pagina or {}).get("payload") or []
+    for m in mensajes[-LIMITE_MENSAJES_DISPONIBILIDAD:]:
+        if m.get("message_type") not in (1, "outgoing"):
+            continue
+        texto = m.get("content") or ""
+        if any(p.search(texto) for p in PATRONES_COBRANZA):
+            return True
+    return False
+
+
 @frappe.whitelist()
 def clasificar(inbox_id, dias_max: int = 30) -> dict:
     """Solo lectura. Devuelve, por cada conversación abierta y muda del inbox
@@ -458,6 +505,8 @@ def clasificar(inbox_id, dias_max: int = 30) -> dict:
             motivo = f"deal cerrado ({deal.get('status')})"
         elif _tiene_disponibilidad_cerrada(c["id"]):
             motivo = "ya se confirmó sin disponibilidad para la fecha consultada"
+        elif _es_hilo_cobranza(c["id"]):
+            motivo = "hilo de cobranza/comprobante — no es reactivación de prospecto"
 
         sender = (c.get("meta") or {}).get("sender") or {}
         resultado.append({
@@ -686,6 +735,8 @@ def _sigue_elegible(fila) -> str | None:
             return "el contacto ya es cliente activo"
     if _tiene_disponibilidad_cerrada(fila.conversation_id):
         return "ya se confirmó sin disponibilidad para la fecha consultada"
+    if _es_hilo_cobranza(fila.conversation_id):
+        return "hilo de cobranza/comprobante — no insistir"
     return None
 
 
