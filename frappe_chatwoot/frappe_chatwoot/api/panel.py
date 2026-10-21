@@ -201,7 +201,10 @@ def get_contact_panel(conversation_id: int = None, phone: str = None) -> dict:
         "CRM Deal",
         filters={"contact": contact_name},
         fields=[
-            "name", "organization", "status", "deal_value", "currency",
+            # `deal_name` es el título de la oportunidad (`title_field` del
+            # doctype). El folio (`name`) solo se conserva para navegar/enlazar:
+            # el panel muestra el nombre, no CRM-DEAL-2026-XXXXX.
+            "name", "deal_name", "organization", "status", "deal_value", "currency",
             "deal_owner", "ghl_stage", "ghl_status", "modified",
             # Denormalizados por el motor de secuencias (ver
             # utils/secuencias.py, `_reflejar_en_deal`): el panel muestra si el
