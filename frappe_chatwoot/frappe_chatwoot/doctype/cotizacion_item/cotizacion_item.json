@@ -1,0 +1,29 @@
+{
+ "actions": [],
+ "creation": "2026-10-20 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["producto","codigo","descripcion","medida","unidad","piezas_por_m2","cantidad","precio_unitario","descuento_pct","importe"],
+ "fields": [
+  {"fieldname":"producto","fieldtype":"Link","in_list_view":1,"label":"Producto","options":"CRM Product"},
+  {"fieldname":"codigo","fieldtype":"Data","in_list_view":1,"label":"Código","read_only":1},
+  {"fieldname":"descripcion","fieldtype":"Data","in_list_view":1,"label":"Descripción"},
+  {"fieldname":"medida","fieldtype":"Data","label":"Medida","read_only":1},
+  {"fieldname":"unidad","fieldtype":"Select","label":"Unidad","options":"pieza\nm2","default":"pieza"},
+  {"fieldname":"piezas_por_m2","fieldtype":"Float","label":"Piezas por m²","read_only":1},
+  {"fieldname":"cantidad","fieldtype":"Float","in_list_view":1,"label":"Cantidad"},
+  {"fieldname":"precio_unitario","fieldtype":"Currency","in_list_view":1,"label":"Precio unitario"},
+  {"fieldname":"descuento_pct","fieldtype":"Percent","label":"Descuento %"},
+  {"fieldname":"importe","fieldtype":"Currency","in_list_view":1,"label":"Importe","read_only":1}
+ ],
+ "istable": 1,
+ "modified": "2026-10-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe Chatwoot",
+ "name": "Cotizacion Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
