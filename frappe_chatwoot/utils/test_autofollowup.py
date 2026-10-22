@@ -151,12 +151,37 @@ class TestEsClienteGuard(FrappeTestCase):
     def test_con_erpnext_sin_vinculo_es_false(self):
         with patch.object(autofollowup.frappe, "get_installed_apps",
                           return_value=APPS_CON_ERP):
-            with patch.object(autofollowup.frappe.db, "get_value", return_value=None):
+            with patch("frappe_chatwoot.utils.cliente_erp.customer_de_contacto",
+                       return_value=None):
                 self.assertFalse(autofollowup._es_cliente("CONT-1"))
 
-    def test_con_erpnext_y_customer_vinculado_es_true(self):
+    def test_con_erpnext_customer_vinculado_sin_factura_es_false(self):
+        """Customer stub (auto-creado por `crear_customer_si_falta` para
+        visibilidad en el selector de facturación) sin ninguna `Sales
+        Invoice` NO cuenta como cliente activo — caso real: Jana, conv 5184,
+        excluida del autofollowup el 2026-10-20 por este falso positivo."""
         with patch.object(autofollowup.frappe, "get_installed_apps",
                           return_value=APPS_CON_ERP):
-            with patch.object(autofollowup.frappe.db, "get_value",
-                              side_effect=["ghl-1", "CUST-1"]):
-                self.assertTrue(autofollowup._es_cliente("CONT-1"))
+            with patch("frappe_chatwoot.utils.cliente_erp.customer_de_contacto",
+                       return_value="CUST-1"):
+                with patch.object(autofollowup.frappe.db, "exists", return_value=False) as ex:
+                    self.assertFalse(autofollowup._es_cliente("CONT-1"))
+                    ex.assert_called_once_with(
+                        "Sales Invoice", {"customer": "CUST-1", "docstatus": 1})
+
+    def test_con_erpnext_customer_vinculado_con_factura_es_true(self):
+        with patch.object(autofollowup.frappe, "get_installed_apps",
+                          return_value=APPS_CON_ERP):
+            with patch("frappe_chatwoot.utils.cliente_erp.customer_de_contacto",
+                       return_value="CUST-1"):
+                with patch.object(autofollowup.frappe.db, "exists", return_value=True):
+                    self.assertTrue(autofollowup._es_cliente("CONT-1"))
+
+    def test_con_erpnext_sin_customer_vinculado_no_consulta_facturas(self):
+        with patch.object(autofollowup.frappe, "get_installed_apps",
+                          return_value=APPS_CON_ERP):
+            with patch("frappe_chatwoot.utils.cliente_erp.customer_de_contacto",
+                       return_value=None):
+                with patch.object(autofollowup.frappe.db, "exists") as ex:
+                    self.assertFalse(autofollowup._es_cliente("CONT-1"))
+                    ex.assert_not_called()

@@ -302,6 +302,18 @@ def _es_cliente(contact_name: str | None) -> bool:
     también es `False` sin consultar nada — mismo resultado que antes, cero
     regresión en sitios que no lo configuren.
 
+    Exige factura real (2026-10-22): `cliente_erp.crear_customer_si_falta`
+    autocrea un `Customer` para CUALQUIER `Contact` nuevo/editado (visibilidad
+    en el selector de facturación, caso Alma Cabello 2026-09-25) — sin
+    relación a venta. En `crm.lavendi.mx` (el único sitio con erpnext) esto
+    deja el vínculo desnudo sin valor como señal de "ya es cliente": de 186
+    Customer, solo 100 tienen alguna `Sales Invoice`. Caso real que lo
+    destapó: Jana (conv 5184, deal CRM-DEAL-2026-03955, Lead recién llegado
+    por formulario web) excluida del autofollowup por un Customer stub de 0
+    facturas, creado el mismo día que su Contact. Ahora el vínculo por sí solo
+    NO basta — se exige al menos una `Sales Invoice` submitted (docstatus=1)
+    del Customer resuelto.
+
     Sigue siendo cierto que quien de verdad protege el barrido es la allowlist
     fail-closed de `barrer()` (`autofollow_inboxes`), no este criterio — este
     fallback reduce falsos negativos, no es la única defensa.
@@ -315,7 +327,10 @@ def _es_cliente(contact_name: str | None) -> bool:
     # podía resolver al Customer equivocado (o a ninguno).
     from frappe_chatwoot.utils import cliente_erp
 
-    return bool(cliente_erp.customer_de_contacto(contact_name))
+    customer = cliente_erp.customer_de_contacto(contact_name)
+    if not customer:
+        return False
+    return bool(frappe.db.exists("Sales Invoice", {"customer": customer, "docstatus": 1}))
 
 
 def _deal_de(conversation_id) -> dict | None:
