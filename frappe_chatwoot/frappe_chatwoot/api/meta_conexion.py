@@ -583,18 +583,54 @@ def autorizar_instagram() -> dict:
     `conectar_pagina`, que sí crea el inbox él mismo y por eso puede llamar
     `completar_wiring` directo).
 
-    PENDIENTE (fuera de alcance de este cambio, trabajo de frontend): alguien
-    tiene que llamar `completar_wiring(inbox_id, ...)` por separado una vez
-    que el inbox de Instagram ya exista en Chatwoot — por ejemplo comparando
-    `list_inboxes()` antes/después de que el usuario vuelva del OAuth, o
-    a mano desde la consola de Frappe como fallback. Hasta que eso se
-    construya, enrutar ese inbox sigue siendo 100% manual, igual que hoy."""
+    CÓMO SE DETECTA EL INBOX NUEVO (resuelto 2026-10-22, ver `instagram_ids_cuenta`):
+    el frontend llama `instagram_ids_cuenta()` antes de abrir el popup y vuelve a
+    llamarlo mientras sondea — en cuanto aparece un id que no estaba antes, llama
+    `completar_wiring(inbox_id, canal_nombre="Instagram")` sola. Antes de este cambio
+    el frontend diffeaba contra `estado_mensajeria()` (filtrado por
+    `_inboxes_del_sitio()`, que depende de `canales_bandeja`) — un círculo vicioso
+    real que nunca detectaba nada, porque el propio wiring es quien llena ese campo
+    (bug confirmado con el caso real de EEPLV, 2026-10-22: Chatwoot sí creaba el
+    inbox 28, pero nunca se enganchaba). `instagram_ids_cuenta()` existe
+    exclusivamente para ese diff — sin filtrar por sitio, a propósito."""
     _exigir_admin()
     data = cw._post("/instagram/authorization", {}) or {}
     url = data.get("url")
     if not url:
         frappe.throw("Chatwoot no devolvió la URL de autorización de Instagram.")
     return {"url": url}
+
+
+@frappe.whitelist()
+def instagram_ids_cuenta() -> dict:
+    """Ids (sin nombres, a propósito) de TODOS los inboxes `Channel::Instagram`
+    de la cuenta COMPARTIDA de Chatwoot — sin filtrar por sitio.
+
+    POR QUÉ SIN FILTRAR (y por qué eso es correcto aquí, no un hueco de
+    aislamiento nuevo): `autorizar_instagram()` nunca recibe de vuelta el
+    `inbox_id` del inbox que Chatwoot crea — la única forma de saber que
+    "ya se conectó algo" es comparar un snapshot de antes/después. Si ese
+    snapshot se filtra por `_inboxes_del_sitio()` (que depende de
+    `canales_bandeja`), el inbox nuevo JAMÁS puede aparecer en el "después"
+    porque ese mismo campo es lo que el wiring todavía no llenó — círculo
+    vicioso confirmado con el caso real de EEPLV (inbox 28 creado en Chatwoot,
+    nunca detectado, nunca wireado). Por eso este endpoint es deliberadamente
+    de cuenta completa.
+
+    POR QUÉ SOLO IDS, SIN `name` (mitiga la exposición entre clientes): el
+    panel de un cliente no debe poder leer el nombre/usuario de Instagram de
+    otro. Con solo ids, lo único que un cliente puede inferir es "apareció un
+    id nuevo en la cuenta compartida" — ya expuesto hoy de facto por `/app`
+    de Chatwoot para cualquiera con esas credenciales, que los clientes no
+    tienen. El riesgo residual real es de concurrencia, no de privacidad: si
+    DOS clientes conectan Instagram en la misma ventana de sondeo (~5 min),
+    el frontend podría wirear el id equivocado al cliente equivocado. Mismo
+    riesgo teórico que ya existía (sin resolverse) en el diff viejo; probabi-
+    lidad baja dado el volumen de altas simultáneas, no se resuelve aquí."""
+    _exigir_admin()
+    inboxes = cw.list_inboxes()
+    ids = [frappe.utils.cint(i.get("id")) for i in inboxes if i.get("channel_type") == "Channel::Instagram"]
+    return {"ids": ids}
 
 
 @frappe.whitelist()
