@@ -93,6 +93,8 @@ def _paso_dict(row, plantillas: dict) -> dict:
         "valor_destino": row.get("valor_destino") or "",
         "condicion_campo": row.get("condicion_campo") or "",
         "condicion_valor": row.get("condicion_valor") or "",
+        "opcion_continuar": row.get("opcion_continuar") or "",
+        "opcion_detener": row.get("opcion_detener") or "",
         "plantilla": row.get("plantilla") or "",
         "plantilla_titulo": (p or {}).get("titulo") or "",
         "plantilla_canal": (p or {}).get("canal") or "",
@@ -178,6 +180,7 @@ def _asignar(row, datos: dict) -> None:
     for campo in (
         "tipo", "nombre_ghl", "mensaje", "asunto", "html", "adjunto_url",
         "campo_destino", "valor_destino", "condicion_campo", "condicion_valor",
+        "opcion_continuar", "opcion_detener",
         "plantilla",
     ):
         if campo in datos:
@@ -281,6 +284,8 @@ def duplicar(name: str) -> dict:
             "valor_destino": paso.valor_destino,
             "condicion_campo": paso.condicion_campo,
             "condicion_valor": paso.condicion_valor,
+            "opcion_continuar": paso.get("opcion_continuar"),
+            "opcion_detener": paso.get("opcion_detener"),
             "plantilla": paso.get("plantilla"),
         })
     doc.insert()

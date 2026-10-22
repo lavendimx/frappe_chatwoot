@@ -42,8 +42,16 @@ scheduler_events = {
             "frappe_chatwoot.utils.recordatorios.enviar_recordatorios",
         ],
         # Aviso push al asesor 10 min antes (pedido de Irene, 2026-10-20).
+        # OJO (2026-10-21): apuntaba a avisos_cita.avisar, que lee
+        # recordatorio_citas_activo (el interruptor del WhatsApp de 60 min al
+        # CLIENTE, apagado ese dia). El modulo desacoplado es
+        # avisos_cita_asesor.avisar -> aviso_asesor_10_activo (encendido).
         "*/5 * * * *": [
-            "frappe_chatwoot.utils.avisos_cita.avisar",
+            "frappe_chatwoot.utils.avisos_cita_asesor.avisar",
+            # Alerta de "ya vas tarde para la llamada" (mensaje de Irene,
+            # 2026-10-21). Dedupe por hora dentro del propio modulo, asi que
+            # correrlo cada 5 min no multiplica avisos.
+            "frappe_chatwoot.utils.aviso_atraso.avisar",
         ],
         # Motor de secuencias PVP — réplica de «4. Seguimientos» de GHL.
         # `avanzar()` sale en la primera línea si

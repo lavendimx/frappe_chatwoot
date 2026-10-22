@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 import frappe
 
 from . import autoria, chatwoot_client, telefono
+from . import dnd
 
 # ---------------------------------------------------------------------------
 # Fallback Fase 2 de `_es_cliente` para sitios SIN erpnext (2026-10-12)
@@ -512,6 +513,8 @@ def clasificar(inbox_id, dias_max: int = 30) -> dict:
         motivo = None
         if _ultimo_es_humano(last):
             motivo = "último mensaje es de un humano del equipo"
+        elif dnd.en_dnd(deal.get("contact")):
+            motivo = "contacto marcado como no-contactar (DND)"
         elif _es_cliente(deal.get("contact")):
             motivo = "es cliente activo (Customer vinculado)"
         elif _tiene_secuencia_activa(deal.get("name")):
@@ -746,6 +749,8 @@ def _sigue_elegible(fila) -> str | None:
         if status in ("Won", "Lost"):
             return f"el deal se cerró ({status})"
         contacto = frappe.db.get_value("CRM Deal", fila.deal, "contact")
+        if dnd.en_dnd(contacto):
+            return "contacto marcado como no-contactar (DND)"
         if _es_cliente(contacto):
             return "el contacto ya es cliente activo"
     if _tiene_disponibilidad_cerrada(fila.conversation_id):

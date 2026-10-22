@@ -130,9 +130,11 @@ PENDIENTE DE DECISIÓN HUMANA (no se inventó, se documenta)
 import json
 import os
 import random
+import re
 import time
 
 import frappe
+from frappe_chatwoot.utils import dnd
 from frappe_chatwoot.utils import plan
 
 from . import autoria
@@ -875,6 +877,69 @@ def _nombre_deal(deal: str) -> str:
         return deal
 
 
+def _normaliza_opcion_cta(texto: str) -> str:
+    """minúsculas, trim, sin variation-selector/combining-enclosing-keycap
+    (los bytes invisibles detrás de "2️⃣": U+FE0F y U+20E3)."""
+    texto = (texto or "").strip().lower()
+    return re.sub(r"[\ufe0f\u20e3]", "", texto)
+
+
+def _coincide_opcion_cta(mensaje: str, opcion: str) -> bool:
+    opcion = _normaliza_opcion_cta(opcion)
+    if not opcion:
+        return False
+    mensaje = _normaliza_opcion_cta(mensaje)
+    if opcion.isdigit():
+        # "2", "2.", "opción 2", "2️⃣" todos deben matchear la opción "2" —
+        # pero el mensaje debe ser SOLO ese dígito (con puntuación/espacios
+        # alrededor), no un número de teléfono o un precio que lo contenga.
+        return bool(re.fullmatch(rf"\D*{re.escape(opcion)}\D*", mensaje))
+    return mensaje == opcion
+
+
+def _opt_out_por_cta(ins: dict, texto_respuesta: str) -> str | None:
+    """¿La respuesta coincide con la opción de "detener" del CTA del paso que
+    se acaba de mandar? Devuelve el motivo (para `estado`/`motivo` de la
+    inscripción) o `None` si no aplica — ya sea porque el paso no tiene CTA
+    configurado o porque la respuesta no coincide con ninguna opción."""
+    paso_num = frappe.utils.cint(ins.get("paso_actual"))
+    if not paso_num:
+        return None
+    paso = frappe.db.get_value(
+        "Secuencia Paso", {"parent": ins["secuencia"], "idx": paso_num},
+        ["opcion_continuar", "opcion_detener"], as_dict=True,
+    )
+    if not paso or not paso.get("opcion_detener"):
+        return None
+    if _coincide_opcion_cta(texto_respuesta, paso["opcion_detener"]):
+        return (f"contacto eligió «{paso['opcion_detener']}» (detener) en el CTA "
+                f"del paso {paso_num} — opt-out automático")
+    return None
+
+
+def _avisar_opt_out(ins: dict, motivo: str) -> None:
+    """Avisa que un contacto se dio de baja solo, vía el CTA de la secuencia.
+
+    Señal opuesta a `_avisar_respondio`: aquí NO hay interés que revisar, es
+    aviso de que el DND quedó prendido — mismo canal (`CRM Notification`),
+    mismo criterio best-effort."""
+    try:
+        deal_owner = frappe.db.get_value("CRM Deal", ins["deal"], "deal_owner")
+        mensaje = f"{_nombre_deal(ins['deal'])} pidió no ser contactado más — DND activado ({motivo})."
+        frappe.get_doc({
+            "doctype": "CRM Notification",
+            "from_user": frappe.session.user,
+            "to_user": deal_owner or frappe.session.user,
+            "type": "Mention",
+            "message": mensaje,
+            "notification_text": mensaje,
+            "reference_doctype": "CRM Deal",
+            "reference_name": ins["deal"],
+        }).insert(ignore_permissions=True)
+    except Exception as exc:
+        frappe.log_error(f"secuencia {ins.get('name')}: aviso de opt-out: {exc}", "Secuencias")
+
+
 def _avisar_respondio(ins: dict) -> None:
     """Avisa que un prospecto en seguimiento automático volvió a escribir.
 
@@ -1178,6 +1243,14 @@ def _ejecutar_paso(ins: dict, paso: dict, sec: dict) -> str:
 
 def _debe_salir(ins: dict) -> str | None:
     """¿Esta inscripción tiene que detenerse antes de ejecutar su paso?"""
+    # DND por contacto (2026-10-22): se mira ANTES que cualquier otra cosa —
+    # un contacto marcado "no contactar" no debe recibir ni el siguiente
+    # paso ni ningún aviso de que "respondió". `dnd.activar()` ya cancela
+    # esta inscripción al prenderse, pero este chequeo cubre la ventana entre
+    # que se marca el DND y que el scheduler vuelve a correr.
+    if dnd.en_dnd(ins.get("contacto")):
+        return "contacto marcado como no-contactar (DND)"
+
     # Doble vocabulario de estatus: `ghl_status` (migración) y `status` (Frappe)
     # NO son consistentes — hay deals con `ghl_status=open` y `status=Lost`.
     # Mirar solo `ghl_status` dejaba que la secuencia le siguiera escribiendo a
@@ -1253,6 +1326,21 @@ def _debe_salir(ins: dict) -> str | None:
                     frappe.db.set_value("Secuencia Inscripcion", ins["name"],
                                         "ultimo_mensaje_cliente_at", creado,
                                         update_modified=False)
+                    # Opt-out por CTA (2026-10-22): si el paso que se acaba de
+                    # mandar traía un CTA numerado ("1️⃣ Si quiero seguir /
+                    # 2️⃣ Ya no me contacten") configurado en
+                    # `Secuencia Paso.opcion_detener`, y la respuesta coincide
+                    # con esa opción, el contacto está pidiendo baja — no es
+                    # la señal de interés que `_avisar_respondio` asume.
+                    # `ins["paso_actual"]` ya quedó en el idx (1-based) del
+                    # paso recién enviado (ver `avanzar()`: se guarda
+                    # `siguiente + 1`, y `siguiente` es el índice 0-based de
+                    # ESE paso == idx 1-based en `Secuencia Paso`).
+                    motivo_opt_out = _opt_out_por_cta(ins, m.get("content") or "")
+                    if motivo_opt_out:
+                        dnd._activar_interno(ins["contacto"], motivo=motivo_opt_out, origen="cta")
+                        _avisar_opt_out(ins, motivo_opt_out)
+                        return motivo_opt_out
                     _avisar_respondio(ins)
                     # NO saca (2026-09-24). Responder significa interés, no
                     # baja: el prospecto se queda en la secuencia y solo se
