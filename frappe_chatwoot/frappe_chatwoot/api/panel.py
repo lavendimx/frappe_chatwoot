@@ -25,6 +25,7 @@ los últimos 10 dígitos del número — mismo criterio que usa el agente en
 import json
 import os
 import re
+import sqlite3
 import urllib.error
 import urllib.request
 
@@ -45,6 +46,25 @@ MAX_NOTES = 20
 
 # Espejo de `api/chatwoot.MAX_ADJUNTOS`: mismo tope para el primer mensaje.
 MAX_ADJUNTOS = 5
+
+# ---------------------------------------------------------------------------
+# Historial de mensajes migrados de GHL (solo EEPLV) — ver contrato
+# `programa-interes-panel-y-historial-chat-20261022.md` (objetivo B, opción 3
+# del log de decisiones #2): lectura PURA del SQLite de la migración, nunca se
+# escribe nada en Chatwoot ni se inserta ningún mensaje — así el poller del
+# bot (`agente-ia`, por ID de mensaje) nunca puede confundir un mensaje viejo
+# con uno nuevo. Archivo específico de este cliente, no es un mecanismo
+# genérico para los otros 9 sitios del bench.
+# ---------------------------------------------------------------------------
+HISTORICO_GHL_SITIO = "eeplv.lavendi.mx"
+HISTORICO_GHL_SQLITE = (
+    "/home/frappe/frappe-bench/sites/eeplv.lavendi.mx/private/historico-ghl/historico-eeplv.sqlite"
+)
+MAX_MENSAJES_HISTORICO = 400
+# Tipos que GHL usa para actividad del sistema (cambios de etapa, citas,
+# comentarios internos del equipo) — no son mensajes reales con el prospecto.
+_TIPOS_RUIDO_HISTORICO_PREFIJO = "TYPE_ACTIVITY_"
+_TIPOS_RUIDO_HISTORICO_EXACTO = {"TYPE_INTERNAL_COMMENT"}
 
 
 @frappe.whitelist()
@@ -190,27 +210,39 @@ def get_contact_panel(conversation_id: int = None, phone: str = None) -> dict:
     if not contact_name:
         return {"found": False, "chatwoot": contacto_chatwoot, "phone": telefono}
 
+    # "Programa de interés" es un Custom Field de catálogo (diplomados) creado
+    # solo en EEPLV — en el resto de los sitios la columna no existe. Se checa
+    # con el propio meta (mismo patrón que `get_programa_interes_options`) en
+    # vez de asumirlo global, para no reventar el panel en los otros 10 sitios.
+    contact_fields = ["name", "first_name", "last_name", "company_name", "mobile_no", "phone", "email_id", "designation"]
+    if frappe.get_meta("Contact").get_field("programa_de_interes"):
+        contact_fields.append("programa_de_interes")
+
     contacto = frappe.db.get_value(
         "Contact",
         contact_name,
-        ["name", "first_name", "last_name", "company_name", "mobile_no", "phone", "email_id", "designation"],
+        contact_fields,
         as_dict=True,
     ) or {}
+
+    deal_fields = [
+        # `deal_name` es el título de la oportunidad (`title_field` del
+        # doctype). El folio (`name`) solo se conserva para navegar/enlazar:
+        # el panel muestra el nombre, no CRM-DEAL-2026-XXXXX.
+        "name", "deal_name", "organization", "status", "deal_value", "currency",
+        "deal_owner", "ghl_stage", "ghl_status", "modified",
+        # Denormalizados por el motor de secuencias (ver
+        # utils/secuencias.py, `_reflejar_en_deal`): el panel muestra si el
+        # contacto está enrolado y en qué paso, sin abrir otra pantalla.
+        "secuencia_actual", "secuencia_paso", "secuencia_estado",
+    ]
+    if frappe.get_meta("CRM Deal").get_field("programa_de_interes"):
+        deal_fields.append("programa_de_interes")
 
     deals = frappe.get_all(
         "CRM Deal",
         filters={"contact": contact_name},
-        fields=[
-            # `deal_name` es el título de la oportunidad (`title_field` del
-            # doctype). El folio (`name`) solo se conserva para navegar/enlazar:
-            # el panel muestra el nombre, no CRM-DEAL-2026-XXXXX.
-            "name", "deal_name", "organization", "status", "deal_value", "currency",
-            "deal_owner", "ghl_stage", "ghl_status", "modified",
-            # Denormalizados por el motor de secuencias (ver
-            # utils/secuencias.py, `_reflejar_en_deal`): el panel muestra si el
-            # contacto está enrolado y en qué paso, sin abrir otra pantalla.
-            "secuencia_actual", "secuencia_paso", "secuencia_estado",
-        ],
+        fields=deal_fields,
         order_by="modified desc",
         limit=MAX_DEALS,
     )
@@ -234,6 +266,110 @@ def get_contact_panel(conversation_id: int = None, phone: str = None) -> dict:
         "leads": leads,
         "notes": _notas_de(referencias),
     }
+
+
+@frappe.whitelist()
+def get_programa_interes_options() -> list[str]:
+    """Catálogo vigente de "Programa de interés", leído del propio campo
+    (Custom Field de `Contact`) en vez de hardcodear la lista en el frontend —
+    si el catálogo cambia (alta/baja de un programa), el panel de Conversaciones
+    no se desincroniza del dropdown real que ya usa Contactos/el Deal."""
+    validate_role()
+    meta = frappe.get_meta("Contact")
+    campo = meta.get_field("programa_de_interes")
+    if not campo or not campo.options:
+        return []
+    return [op for op in campo.options.split("\n") if op]
+
+
+@frappe.whitelist()
+def set_programa_interes(contact: str, value: str = "") -> dict:
+    """Edición manual del "Programa de interés" desde el panel de Conversaciones
+    (pedido de Alejandro 2026-10-22: hoy el bot lo llena solo y queda de solo
+    lectura; el equipo necesita poder corregirlo a mano igual que ya pueden
+    hacerlo desde la ficha de Contactos).
+
+    Escribe SOLO a nivel `Contact` — es el mismo campo que ya quedó editable en
+    `/crm/contacts/<nombre>` (ver `CRM Fields Layout` de Contact-Side Panel),
+    así que los dos puntos de edición terminan escribiendo al mismo lugar y no
+    pueden desincronizarse entre sí. El valor por-Deal (mostrado en cada
+    tarjeta de oportunidad) sigue siendo de solo lectura en este panel — es
+    terreno de la ficha del propio Deal, no de este atajo."""
+    validate_role()
+    if not frappe.get_meta("Contact").get_field("programa_de_interes"):
+        frappe.throw("Este sitio no tiene catálogo de Programa de interés")
+    if not contact or not frappe.db.exists("Contact", contact):
+        frappe.throw("Contacto no encontrado")
+    opciones = set(get_programa_interes_options())
+    if value and value not in opciones:
+        frappe.throw(f"\"{value}\" no es una opción válida de Programa de interés")
+    frappe.db.set_value("Contact", contact, "programa_de_interes", value or "")
+    frappe.db.commit()
+    return {"contact": contact, "programa_de_interes": value or ""}
+
+
+@frappe.whitelist()
+def historial_migrado(conversation_id: int = None, phone: str = None) -> dict:
+    """Mensajes de GHL anteriores al corte del 22-oct-2026, para el contacto de
+    esta conversación — bloque de SOLO LECTURA aparte del hilo real de Chatwoot
+    (opción 3 del contrato, ver cabecera de `HISTORICO_GHL_SQLITE` arriba).
+
+    Nunca escribe nada: ni en Chatwoot, ni en el CRM. Si el sitio no es EEPLV,
+    o el archivo no está, o el contacto no tiene match en el histórico, regresa
+    `disponible`/`mensajes` vacíos en vez de reventar — un sitio sin este
+    archivo (los otros 9 del bench) no debe notar ninguna diferencia.
+    """
+    validate_role()
+    if frappe.local.site != HISTORICO_GHL_SITIO or not os.path.exists(HISTORICO_GHL_SQLITE):
+        return {"disponible": False, "mensajes": []}
+
+    telefono = phone
+    if not telefono and conversation_id:
+        conv = cw.get_conversation(frappe.utils.cint(conversation_id))
+        sender = ((conv or {}).get("meta") or {}).get("sender") or {}
+        telefono = sender.get("phone_number") or sender.get("identifier")
+    if not telefono:
+        return {"disponible": True, "mensajes": []}
+
+    contact_name = _contacto_por_telefono(telefono)
+    ghl_contact_id = (
+        frappe.db.get_value("Contact", contact_name, "ghl_contact_id") if contact_name else None
+    )
+    corto = telefono_corto(telefono)
+
+    con = sqlite3.connect(f"file:{HISTORICO_GHL_SQLITE}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        cur = con.cursor()
+        ids_conversacion = []
+        if ghl_contact_id:
+            cur.execute("SELECT id FROM conversaciones WHERE contact_id = ?", (ghl_contact_id,))
+            ids_conversacion = [r["id"] for r in cur.fetchall()]
+        if not ids_conversacion and corto:
+            cur.execute("SELECT id FROM conversaciones WHERE telefono LIKE ?", (f"%{corto}",))
+            ids_conversacion = [r["id"] for r in cur.fetchall()]
+        if not ids_conversacion:
+            return {"disponible": True, "mensajes": []}
+
+        marcadores = ",".join("?" * len(ids_conversacion))
+        cur.execute(
+            f"""
+            SELECT direction, fecha, cuerpo, message_type
+            FROM mensajes
+            WHERE conversation_id IN ({marcadores})
+              AND message_type NOT LIKE '{_TIPOS_RUIDO_HISTORICO_PREFIJO}%'
+              AND message_type NOT IN ({",".join("?" * len(_TIPOS_RUIDO_HISTORICO_EXACTO))})
+              AND cuerpo IS NOT NULL AND trim(cuerpo) != ''
+            ORDER BY fecha ASC
+            LIMIT ?
+            """,
+            (*ids_conversacion, *_TIPOS_RUIDO_HISTORICO_EXACTO, MAX_MENSAJES_HISTORICO),
+        )
+        mensajes = [dict(r) for r in cur.fetchall()]
+    finally:
+        con.close()
+
+    return {"disponible": True, "mensajes": mensajes}
 
 
 @frappe.whitelist()
