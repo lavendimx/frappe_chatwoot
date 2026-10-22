@@ -69,13 +69,18 @@ def _asegurar_unsubscribe(email: str) -> None:
 
 
 def _cancelar_inscripciones_activas(contacto: str, motivo: str) -> int:
+    # Import diferido: secuencias.py importa este módulo a nivel de módulo
+    # (ciclo si se importara arriba). Debe pasar por _set_ins(), el único
+    # punto que refleja el cambio en CRM Deal — ver secuencias.py:393-395.
+    from frappe_chatwoot.utils import secuencias
+
     activas = frappe.get_all(
         "Secuencia Inscripcion", filters={"contacto": contacto, "estado": "Activa"},
         pluck="name",
     )
     for nombre in activas:
-        frappe.db.set_value(
-            "Secuencia Inscripcion", nombre,
+        secuencias._set_ins(
+            nombre,
             {"estado": "Salió por cambio de etapa", "motivo": motivo[:280]},
             update_modified=False,
         )
