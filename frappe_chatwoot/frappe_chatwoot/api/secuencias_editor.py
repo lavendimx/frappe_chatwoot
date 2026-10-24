@@ -125,6 +125,7 @@ def _detalle(doc) -> dict:
         "horario_habil": bool(doc.horario_habil),
         "producto": doc.get("producto") or "",
         "max_por_corrida": cint(doc.get("max_por_corrida")),
+        "inbox_id": doc.get("inbox_id") or "",
         "pasos": pasos,
         "total_pasos": len(pasos),
         "inscritos": estados,
@@ -241,11 +242,18 @@ def crear(titulo: str, disparador: str = "Manual", disparador_valor: str = "",
 
 @frappe.whitelist()
 def guardar_datos(name: str, datos=None) -> dict:
-    """Título, disparador y reglas de la secuencia (no toca los pasos)."""
+    """Título, disparador, reglas y canal de WhatsApp de la secuencia (no toca
+    los pasos). `inbox_id` (Custom Field `Data`) es el inbox de Chatwoot que el
+    motor usa para mandar el paso de WhatsApp (`utils/secuencias.py`); vacío =
+    el motor omite ese paso. Se guarda tal cual lo manda el editor (ya
+    restringido en el frontend a las opciones reales de
+    `meta_conexion.estado_mensajeria().whatsapp_cloud` del sitio) — sin
+    validar aquí contra Chatwoot para no acoplar este endpoint a esa consulta
+    en cada guardado."""
     _exigir_edicion()
     datos = frappe.parse_json(datos) or {}
     doc = _secuencia(name)
-    for campo in ("titulo", "disparador", "disparador_valor"):
+    for campo in ("titulo", "disparador", "disparador_valor", "inbox_id"):
         if campo in datos:
             doc.set(campo, datos.get(campo))
     for campo in ("parar_si_responde", "permitir_reingreso", "horario_habil", "activa"):

@@ -1638,3 +1638,91 @@ def abrir_conversacion(inbox_id: int, phone: str, message: str = None,
         _pause_conversation(conversation_id, inbox_id)
     _escribir_conversation_id(conversation_id, deal=deal, lead=lead, phone=e164)
     return {"conversation_id": conversation_id, "reutilizada": False, "contact_id": contacto_id}
+
+
+@frappe.whitelist()
+def enviar_por_canal(conversation_id: int, content: str = None, target_inbox_id: int = None,
+                     adjuntos=None) -> dict:
+    """Manda un mensaje forzando que salga por un inbox específico (p.ej. un
+    WhatsApp Cloud API distinto), desde una conversación YA ABIERTA en otro
+    inbox — sin tocar el hilo de origen.
+
+    POR QUÉ ES UNA FUNCIÓN NUEVA Y NO UN PARÁMETRO DE `abrir_conversacion`
+        `abrir_conversacion`/`_buscar_hilo_del_contacto` buscan el hilo del
+        contacto en CUALQUIER inbox del sitio A PROPÓSITO (evitar duplicar
+        hilos — lección de un bug de GHL). Si a esa ruta se le pasara un
+        inbox distinto al de la conversación actual, el resultado sería
+        REUSAR el hilo viejo (de otro canal), justo lo contrario de lo que
+        se pide aquí: el usuario eligió explícitamente mandar por OTRO canal
+        y espera que el mensaje aparezca en ESE canal, aunque eso implique
+        abrir (o seguir) un segundo hilo con la misma persona. Por eso esta
+        función NO llama a `abrir_conversacion` ni a
+        `_buscar_hilo_del_contacto` — replica, acotado a un solo inbox
+        elegido, el mismo patrón que ya usa
+        `utils/secuencias._asegurar_conversacion` para forzar el inbox de
+        una secuencia (busca/crea SOLO en `target_inbox_id`, nunca en
+        "cualquiera del sitio").
+
+    Pasos: (1) resuelve el contacto real de `conversation_id` vía
+    `cw.get_conversation` — el payload de una conversación no trae
+    `contact_id` directo, el id real vive en `meta.sender.id` (verificado en
+    vivo contra `sofiav2.lavendi.mx`); (2) busca si ese contacto ya tiene una
+    conversación `open`/`pending` EN `target_inbox_id` y la reusa si existe;
+    (3) si no, resuelve o crea el `source_id` del contacto para ese inbox
+    (`create_contact_inbox`) y abre la conversación ahí; (4) manda el
+    mensaje (texto y/o adjuntos, mismo soporte de `_enviar` que usa
+    `start_conversation`), marcado como humano.
+
+    Devuelve `{conversation_id, es_nueva, inbox_id}` — `conversation_id` es
+    el hilo REAL donde quedó el mensaje (nuevo o reutilizado en el canal
+    elegido), no el de la conversación de origen.
+    """
+    validate_role()
+    conversation_id = frappe.utils.cint(conversation_id)
+    target_inbox_id = frappe.utils.cint(target_inbox_id)
+    if not conversation_id:
+        frappe.throw("Falta conversation_id.")
+    if not target_inbox_id:
+        frappe.throw("Falta target_inbox_id (el canal por el que se quiere mandar).")
+
+    adjuntos = _parse_adjuntos(adjuntos)
+    content = (content or "").strip()
+    if not content and not adjuntos:
+        frappe.throw("Escribe el mensaje o adjunta un archivo.")
+
+    origen = cw.get_conversation(conversation_id)
+    contacto_id = frappe.utils.cint(((origen.get("meta") or {}).get("sender") or {}).get("id"))
+    if not contacto_id:
+        frappe.throw("No se pudo resolver el contacto de esa conversación.")
+
+    # ¿Ya hay hilo abierto/pendiente de este contacto EN ESE inbox? Se reusa
+    # — nunca se abre un segundo hilo en el mismo canal (mismo criterio que
+    # `secuencias._asegurar_conversacion`).
+    for conv in cw.get_conversations_for_contact(contacto_id):
+        if (frappe.utils.cint(conv.get("inbox_id")) == target_inbox_id
+                and conv.get("status") in ("open", "pending")):
+            destino_id = frappe.utils.cint(conv["id"])
+            _enviar(destino_id, content, adjuntos)
+            return {"conversation_id": destino_id, "es_nueva": False, "inbox_id": target_inbox_id}
+
+    # Sin hilo reutilizable en ese canal: se resuelve/crea el source_id del
+    # contacto para `target_inbox_id` y se abre uno nuevo ahí.
+    detalle = cw.get_contact(contacto_id)
+    source_id = next(
+        (b.get("source_id") for b in (detalle.get("contact_inboxes") or [])
+         if frappe.utils.cint((b.get("inbox") or {}).get("id")) == target_inbox_id),
+        None,
+    )
+    if not source_id:
+        creado = cw.create_contact_inbox(contact_id=contacto_id, inbox_id=target_inbox_id)
+        source_id = (creado.get("payload") or creado).get("source_id")
+    if not source_id:
+        frappe.throw("Chatwoot no devolvió el canal del contacto para ese inbox.")
+
+    conv = cw.create_conversation(source_id=source_id, inbox_id=target_inbox_id, contact_id=contacto_id)
+    destino_id = frappe.utils.cint(conv.get("id") or (conv.get("payload") or {}).get("id"))
+    if not destino_id:
+        frappe.throw("Chatwoot no devolvió el id de la conversación creada.")
+
+    _enviar(destino_id, content, adjuntos)
+    return {"conversation_id": destino_id, "es_nueva": True, "inbox_id": target_inbox_id}
