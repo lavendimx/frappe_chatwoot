@@ -56,6 +56,29 @@ def ver_chunks(source_id):
     }
 
 
+@frappe.whitelist()
+def crear_fuente(inbox_id, title, source_type, content=None, url=None, attachment=None):
+    """Alta de una fuente nueva desde el panel (System Manager). El Web Form
+    publico de clientes ya hace esto mismo vía kb_isolation.py -- antes de esto
+    la unica via de alta era ese Web Form o Frappe Desk."""
+    if not frappe.has_permission("KB Source", ptype="create"):
+        frappe.throw("Sin permiso para crear fuentes de conocimiento", frappe.PermissionError)
+
+    doc = frappe.get_doc(
+        {
+            "doctype": "KB Source",
+            "inbox_id": inbox_id,
+            "title": title,
+            "source_type": source_type,
+            "content": content,
+            "url": url,
+            "attachment": attachment,
+        }
+    )
+    doc.insert()
+    return doc.name
+
+
 def _consultar_chunks(source_id):
     import psycopg2
 
