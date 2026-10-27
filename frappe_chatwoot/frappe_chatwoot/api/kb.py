@@ -1,0 +1,83 @@
+# Añadido por lavendi.mx -- panel de solo lectura de la base de conocimiento del agente IA.
+#
+# La KB real (chunks + embeddings) vive fuera de Frappe, en el Postgres pgvector
+# "sofia_kb" que llena agente-ia/lib/ingest.js. KB Source en Frappe es el metadato
+# (titulo, tipo, estado, conteo) -- leerlo no requiere tocar la vector DB. Ver el
+# contenido indexado si: es la unica forma de ver exactamente que texto quedo
+# embebido (puede diferir del archivo original tras la extraccion/chunking).
+
+import frappe
+
+KB_SOURCE_FIELDS = [
+    "name",
+    "title",
+    "source_type",
+    "status",
+    "chunk_count",
+    "last_synced_at",
+    "error_message",
+    "siempre_incluir",
+]
+
+
+@frappe.whitelist()
+def listar_fuentes(inbox_id):
+    """Fuentes de KB del inbox dado. frappe.get_list (no get_all) para que el
+    aislamiento multi-cliente (kb_isolation.py / User Permission "KB Inbox")
+    siga aplicando tal cual a quien no sea System Manager."""
+    return frappe.get_list(
+        "KB Source",
+        filters={"inbox_id": inbox_id},
+        fields=KB_SOURCE_FIELDS,
+        order_by="title asc",
+    )
+
+
+@frappe.whitelist()
+def ver_chunks(source_id):
+    """Contenido real embebido de una fuente -- tal como lo ve el retrieval, no
+    el archivo original. Permiso explicito: la vector DB no tiene el permission
+    layer de Frappe, asi que se valida aqui antes de tocar Postgres."""
+    if not frappe.has_permission("KB Source", ptype="read", doc=source_id):
+        frappe.throw("Sin permiso para ver esta fuente", frappe.PermissionError)
+
+    fuente = frappe.get_doc("KB Source", source_id)
+    chunks = _consultar_chunks(source_id)
+    return {
+        "fuente": {
+            "name": fuente.name,
+            "title": fuente.title,
+            "source_type": fuente.source_type,
+            "status": fuente.status,
+            "chunk_count": fuente.chunk_count,
+            "last_synced_at": fuente.last_synced_at,
+        },
+        "chunks": chunks,
+    }
+
+
+def _consultar_chunks(source_id):
+    import psycopg2
+
+    conf = frappe.conf.get("kb_pg") or {}
+    if not conf.get("host"):
+        frappe.throw("Conexion a la base de conocimiento (kb_pg) no configurada en este sitio")
+
+    conn = psycopg2.connect(
+        host=conf["host"],
+        port=conf.get("port", 5432),
+        dbname=conf["database"],
+        user=conf["user"],
+        password=conf["password"],
+        connect_timeout=5,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT chunk_index, chunk_text FROM kb_chunks WHERE source_id = %s ORDER BY chunk_index",
+                (source_id,),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [{"chunk_index": r[0], "chunk_text": r[1]} for r in rows]
