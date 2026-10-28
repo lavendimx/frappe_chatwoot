@@ -56,6 +56,7 @@ import frappe
 
 from . import autoria, chatwoot_client, telefono
 from . import dnd
+from .permisos_agente_ia import puede_agente_ia
 
 # ---------------------------------------------------------------------------
 # Fallback Fase 2 de `_es_cliente` para sitios SIN erpnext (2026-10-12)
@@ -878,12 +879,12 @@ def barrer(forzar_inbox=None, dry_run: int = 0) -> dict:
 # vez de pelear con eso desde el front, un endpoint propio hace el guardado
 # completo (escalares + tabla de pasos) en una sola llamada atómica.
 
-_ROLES_EDICION = ("System Manager", "Sales Manager")
-
-
 def _exigir_edicion():
-    roles = frappe.get_roles(frappe.session.user)
-    if frappe.session.user != "Administrator" and not any(r in roles for r in _ROLES_EDICION):
+    # 2026-10-28: la configuración de reactivación es parte de la sección Agente IA,
+    # así que usa el mismo candado que la pantalla (agencia/System Manager + rol
+    # "Administrador Agente IA"). Antes bastaba Sales Manager, que en Estrublock
+    # incluye a gente que no debe ver esta sección.
+    if not puede_agente_ia():
         frappe.throw("Sin permiso para editar la configuración de reactivación")
 
 

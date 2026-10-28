@@ -8,6 +8,8 @@
 
 import frappe
 
+from frappe_chatwoot.utils.permisos_agente_ia import exigir_agente_ia
+
 KB_SOURCE_FIELDS = [
     "name",
     "title",
@@ -25,6 +27,7 @@ def listar_fuentes(inbox_id):
     """Fuentes de KB del inbox dado. frappe.get_list (no get_all) para que el
     aislamiento multi-cliente (kb_isolation.py / User Permission "KB Inbox")
     siga aplicando tal cual a quien no sea System Manager."""
+    exigir_agente_ia()
     return frappe.get_list(
         "KB Source",
         filters={"inbox_id": inbox_id},
@@ -38,6 +41,7 @@ def ver_chunks(source_id):
     """Contenido real embebido de una fuente -- tal como lo ve el retrieval, no
     el archivo original. Permiso explicito: la vector DB no tiene el permission
     layer de Frappe, asi que se valida aqui antes de tocar Postgres."""
+    exigir_agente_ia()
     if not frappe.has_permission("KB Source", ptype="read", doc=source_id):
         frappe.throw("Sin permiso para ver esta fuente", frappe.PermissionError)
 
@@ -61,6 +65,7 @@ def crear_fuente(inbox_id, title, source_type, content=None, url=None, attachmen
     """Alta de una fuente nueva desde el panel (System Manager). El Web Form
     publico de clientes ya hace esto mismo vía kb_isolation.py -- antes de esto
     la unica via de alta era ese Web Form o Frappe Desk."""
+    exigir_agente_ia()
     if not frappe.has_permission("KB Source", ptype="create"):
         frappe.throw("Sin permiso para crear fuentes de conocimiento", frappe.PermissionError)
 
@@ -85,6 +90,7 @@ def detectar_conflictos(source_id, umbral=0.15, limite=30):
     de esta fuente -- candidatos a duplicado, dato desactualizado o informacion
     contradictoria. Solo mide cercania semantica, no hay juicio de IA sobre si
     de verdad contradice: el humano decide viendo ambos fragmentos."""
+    exigir_agente_ia()
     if not frappe.has_permission("KB Source", ptype="read", doc=source_id):
         frappe.throw("Sin permiso para ver esta fuente", frappe.PermissionError)
 
