@@ -41,18 +41,6 @@ scheduler_events = {
         "*/15 * * * *": [
             "frappe_chatwoot.utils.recordatorios.enviar_recordatorios",
         ],
-        # Aviso push al asesor 10 min antes (pedido de Irene, 2026-10-20).
-        # OJO (2026-10-21): apuntaba a avisos_cita.avisar, que lee
-        # recordatorio_citas_activo (el interruptor del WhatsApp de 60 min al
-        # CLIENTE, apagado ese dia). El modulo desacoplado es
-        # avisos_cita_asesor.avisar -> aviso_asesor_10_activo (encendido).
-        "*/5 * * * *": [
-            "frappe_chatwoot.utils.avisos_cita_asesor.avisar",
-            # Alerta de "ya vas tarde para la llamada" (mensaje de Irene,
-            # 2026-10-21). Dedupe por hora dentro del propio modulo, asi que
-            # correrlo cada 5 min no multiplica avisos.
-            "frappe_chatwoot.utils.aviso_atraso.avisar",
-        ],
         # Motor de secuencias PVP — réplica de «4. Seguimientos» de GHL.
         # `avanzar()` sale en la primera línea si
         # `Chatwoot Settings.secuencias_activas` está en 0, así que registrar el
@@ -143,6 +131,24 @@ scheduler_events = {
         # 25-sep sin ningún error visible. NO volver a separar esta clave.
         "*/5 * * * *": [
             "frappe_chatwoot.utils.pausas.expirar_pausas",
+            # Aviso push al asesor 10 min antes (pedido de Irene, 2026-10-20).
+            # OJO (2026-10-21): apuntaba a avisos_cita.avisar, que lee
+            # recordatorio_citas_activo (el interruptor del WhatsApp de 60 min
+            # al CLIENTE, apagado ese dia). El modulo desacoplado es
+            # avisos_cita_asesor.avisar -> aviso_asesor_10_activo.
+            #
+            # FUSIONADO AQUI el 2026-10-26: el 21-oct se agrego como una clave
+            # "*/5 * * * *" SEPARADA mas arriba en este mismo dict, justo lo que
+            # el comentario de aqui prohibe. El dict literal colapso a la ultima
+            # clave y estos dos jobs NUNCA quedaron registrados (verificado en
+            # Scheduled Job Type de estrublock/sixgardens/medicare el 26-oct:
+            # no aparecian). Tercera vez que pasa (18-sep captacion, 13-oct
+            # meta_comentarios, 21-oct estos dos). NO volver a separar la clave.
+            "frappe_chatwoot.utils.avisos_cita_asesor.avisar",
+            # Alerta de "ya vas tarde para la llamada" (mensaje de Irene,
+            # 2026-10-21). Dedupe por hora dentro del propio modulo, asi que
+            # correrlo cada 5 min no multiplica avisos.
+            "frappe_chatwoot.utils.aviso_atraso.avisar",
             # Bienvenida a los leads del formulario del sitio — reemplaza la
             # espera de 5 min que los workflows 1.2/1.3 de GHL tenían dentro
             # del árbol. Barrido sin estado por la misma razón que el
