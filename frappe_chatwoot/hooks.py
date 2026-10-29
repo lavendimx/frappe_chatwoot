@@ -353,6 +353,12 @@ override_doctype_class = {
 # ruta aparte en vez de sobrescribir la clase `Web Form`.
 website_route_rules = [
     {"from_route": "/f/<ruta>", "to_route": "f"},
+    # Agendamiento nativo por calendario (2026-10-29) — paralelo y aditivo a
+    # agenda.lavendi.mx (Google Calendar, single-tenant, api/agenda_publica.py,
+    # NO TOCADO). Funciona sobre el dominio propio de cada sitio
+    # (https://<sitio>/agendar/<slug>). El slug llega por frappe.form_dict
+    # ("slug"), mismo patrón que "/f/<ruta>" -> "ruta" de arriba.
+    {"from_route": "/agendar/<slug>", "to_route": "agendar"},
 ]
 
 # El CSP de embebido: una página `www/` no tiene gancho para poner headers, y
@@ -386,6 +392,12 @@ before_request = [
 
 DOCTYPES_PROPIOS = [
     "Agente IA",
+    # Agendamiento nativo (2026-10-29, objetivo calendarios-agendamiento): camino
+    # ADITIVO y paralelo a agenda_publica.py/www/agenda (Google Calendar,
+    # exclusivo lavendi.mx) — no lo reemplaza ni lo toca. "Reunion Agendada"
+    # (más abajo en esta misma lista) ya gana el campo opcional `calendario`.
+    "Calendario Agendamiento",
+    "Calendario Agendamiento Horario",
     # Single del app: sus 12 campos propios (evolution_*, onboarding_*,
     # inbox_formulario, recordatorio_citas_activo, secuencias_activas, agenda_*,
     # bienvenida_formulario_activa) no viajaban, asi que un sitio de cliente no

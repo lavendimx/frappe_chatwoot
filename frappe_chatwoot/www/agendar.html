@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agendar una cita</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f7f7f8; color: #1a1a1a;
+  }
+  .tarjeta {
+    max-width: 520px; margin: 0 auto; background: #fff; border-radius: 12px;
+    padding: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  p.descripcion { color: #555; margin: 0 0 20px; font-size: .92rem; }
+  .duracion { display: inline-block; background: #eef2ff; color: #3730a3; font-size: .78rem;
+    padding: 3px 10px; border-radius: 999px; margin-bottom: 18px; }
+  label { display: block; font-size: .85rem; font-weight: 600; margin: 14px 0 6px; }
+  input, select, textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;
+    font-size: .95rem; font-family: inherit;
+  }
+  .dias { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-top: 8px; }
+  .dia-btn {
+    flex: 0 0 auto; padding: 8px 14px; border: 1px solid #ddd; border-radius: 8px;
+    background: #fff; cursor: pointer; font-size: .85rem; white-space: nowrap;
+  }
+  .dia-btn.activo { background: #4338ca; color: #fff; border-color: #4338ca; }
+  .slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+  .slot-btn {
+    padding: 9px 4px; border: 1px solid #ddd; border-radius: 8px; background: #fff;
+    cursor: pointer; font-size: .85rem;
+  }
+  .slot-btn.activo { background: #4338ca; color: #fff; border-color: #4338ca; }
+  .vacio { color: #777; font-size: .88rem; padding: 14px 0; }
+  button.enviar {
+    margin-top: 20px; width: 100%; padding: 12px; border: none; border-radius: 8px;
+    background: #4338ca; color: #fff; font-size: .95rem; font-weight: 600; cursor: pointer;
+  }
+  button.enviar:disabled { background: #a3a3a3; cursor: not-allowed; }
+  .error { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+    padding: 12px; font-size: .88rem; }
+  .ok { color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
+    padding: 16px; font-size: .95rem; }
+  .cargando { color: #777; font-size: .85rem; padding: 10px 0; }
+</style>
+</head>
+<body>
+<div class="tarjeta" id="tarjeta">
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% else %}
+  <div id="contenido">
+    <div class="cargando">Cargando calendario…</div>
+  </div>
+  {% endif %}
+</div>
+
+{% if not error %}
+<script>
+(function () {
+  var SLUG = {{ slug | tojson }};
+  var CSRF = {{ csrf_token | tojson }};
+  var contenido = document.getElementById("contenido");
+  var estado = { info: null, dias: [], diaSeleccionado: null, slots: [], slotSeleccionado: null };
+
+  function llamar(metodo, params, opts) {
+    opts = opts || {};
+    var qs = Object.keys(params || {})
+      .map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]); })
+      .join("&");
+    var url = "/api/method/frappe_chatwoot.frappe_chatwoot.api.agenda_calendarios." + metodo;
+    var fetchOpts = { headers: {} };
+    if (opts.post) {
+      fetchOpts.method = "POST";
+      fetchOpts.headers["Content-Type"] = "application/json";
+      fetchOpts.headers["X-Frappe-CSRF-Token"] = CSRF;
+      fetchOpts.body = JSON.stringify(params || {});
+    } else {
+      url += (qs ? "?" + qs : "");
+    }
+    return fetch(url, fetchOpts).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) {
+          var msg = (data && data._server_messages) ? data._server_messages : (data && data.exc) ? data.exc : "Error";
+          throw new Error(msg);
+        }
+        return data.message;
+      });
+    });
+  }
+
+  function agruparPorDia(slots) {
+    var dias = {};
+    slots.forEach(function (s) {
+      if (!dias[s.fecha]) dias[s.fecha] = [];
+      dias[s.fecha].push(s);
+    });
+    return Object.keys(dias).sort().map(function (f) { return { fecha: f, slots: dias[f] }; });
+  }
+
+  function formatoFecha(f) {
+    var d = new Date(f + "T00:00:00");
+    return d.toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" });
+  }
+
+  function render() {
+    if (!estado.info) return;
+    var html = "";
+    html += "<h1>" + estado.info.titulo + "</h1>";
+    if (estado.info.descripcion) html += "<p class=\"descripcion\">" + estado.info.descripcion + "</p>";
+    html += "<span class=\"duracion\">" + estado.info.duracion_minutos + " min</span>";
+
+    if (estado.dias.length === 0) {
+      html += "<div class=\"vacio\">No hay horarios disponibles en este momento.</div>";
+      contenido.innerHTML = html;
+      return;
+    }
+
+    html += "<div class=\"dias\" id=\"dias\"></div>";
+    html += "<div class=\"slots\" id=\"slots\"></div>";
+    html += "<div id=\"form-reserva\"></div>";
+    contenido.innerHTML = html;
+
+    var diasEl = document.getElementById("dias");
+    estado.dias.forEach(function (d) {
+      var b = document.createElement("button");
+      b.className = "dia-btn" + (d.fecha === estado.diaSeleccionado ? " activo" : "");
+      b.textContent = formatoFecha(d.fecha);
+      b.onclick = function () { seleccionarDia(d.fecha); };
+      diasEl.appendChild(b);
+    });
+
+    if (!estado.diaSeleccionado) seleccionarDia(estado.dias[0].fecha);
+    else renderSlots();
+  }
+
+  function seleccionarDia(fecha) {
+    estado.diaSeleccionado = fecha;
+    estado.slotSeleccionado = null;
+    render();
+    renderSlots();
+  }
+
+  function renderSlots() {
+    var slotsEl = document.getElementById("slots");
+    if (!slotsEl) return;
+    var dia = estado.dias.filter(function (d) { return d.fecha === estado.diaSeleccionado; })[0];
+    slotsEl.innerHTML = "";
+    if (!dia || dia.slots.length === 0) {
+      slotsEl.innerHTML = "<div class=\"vacio\">Sin horarios ese día.</div>";
+      return;
+    }
+    dia.slots.forEach(function (s) {
+      var b = document.createElement("button");
+      b.className = "slot-btn" + (s.inicio === estado.slotSeleccionado ? " activo" : "");
+      b.textContent = s.hora_inicio;
+      b.onclick = function () {
+        estado.slotSeleccionado = s.inicio;
+        renderSlots();
+        renderFormulario();
+      };
+      slotsEl.appendChild(b);
+    });
+    renderFormulario();
+  }
+
+  function renderFormulario() {
+    var el = document.getElementById("form-reserva");
+    if (!el) return;
+    if (!estado.slotSeleccionado) { el.innerHTML = ""; return; }
+    el.innerHTML =
+      "<label>Nombre</label><input id=\"f-nombre\" type=\"text\" placeholder=\"Tu nombre\">" +
+      "<label>Teléfono</label><input id=\"f-telefono\" type=\"tel\" placeholder=\"WhatsApp o teléfono\">" +
+      "<label>Correo (opcional)</label><input id=\"f-email\" type=\"email\" placeholder=\"tu@correo.com\">" +
+      "<label>Notas (opcional)</label><textarea id=\"f-notas\" rows=\"2\"></textarea>" +
+      "<button class=\"enviar\" id=\"btn-reservar\">Confirmar cita</button>" +
+      "<div id=\"form-msg\"></div>";
+    document.getElementById("btn-reservar").onclick = reservar;
+  }
+
+  function reservar() {
+    var btn = document.getElementById("btn-reservar");
+    var msg = document.getElementById("form-msg");
+    var nombre = document.getElementById("f-nombre").value.trim();
+    var telefono = document.getElementById("f-telefono").value.trim();
+    var email = document.getElementById("f-email").value.trim();
+    var notas = document.getElementById("f-notas").value.trim();
+
+    if (!nombre) { msg.innerHTML = "<div class=\"error\">Falta el nombre.</div>"; return; }
+    if (!telefono && !email) { msg.innerHTML = "<div class=\"error\">Deja un teléfono o un correo.</div>"; return; }
+
+    btn.disabled = true;
+    msg.innerHTML = "<div class=\"cargando\">Reservando…</div>";
+
+    llamar("reservar", {
+      slug: SLUG, slot_inicio: estado.slotSeleccionado,
+      nombre: nombre, telefono: telefono, email: email, notas: notas,
+    }, { post: true }).then(function () {
+      contenido.innerHTML = "<div class=\"ok\">Listo — tu cita quedó agendada. Te contactaremos para confirmar los detalles.</div>";
+    }).catch(function (e) {
+      btn.disabled = false;
+      msg.innerHTML = "<div class=\"error\">No se pudo reservar: " + e.message + "</div>";
+      // El slot pudo dejar de estar libre entre que se mostró y se confirmó —
+      // se refresca la disponibilidad para que el visitante elija otro.
+      cargarSlots();
+    });
+  }
+
+  function cargarSlots() {
+    return llamar("slots", { slug: SLUG }).then(function (data) {
+      estado.dias = agruparPorDia(data.slots || []);
+      estado.diaSeleccionado = null;
+      estado.slotSeleccionado = null;
+      render();
+    });
+  }
+
+  llamar("calendario_info", { slug: SLUG }).then(function (info) {
+    estado.info = info;
+    return cargarSlots();
+  }).catch(function (e) {
+    contenido.innerHTML = "<div class=\"error\">No se pudo cargar el calendario: " + e.message + "</div>";
+  });
+})();
+</script>
+{% endif %}
+</body>
+</html>
