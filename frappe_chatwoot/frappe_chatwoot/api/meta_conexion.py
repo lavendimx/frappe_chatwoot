@@ -125,11 +125,23 @@ def estado_mensajeria() -> dict:
     así que no hay riesgo de que esta lista los mezcle o los duplique.
     `channel_type`, `provider` y `phone_number` vienen siempre en
     `GET /inboxes` (ver `_inbox.json.jbuilder` del contenedor de Chatwoot, sin
-    gating por rol de administrador para esos 3 campos)."""
+    gating por rol de administrador para esos 3 campos).
+
+    `whatsapp_vinculacion_url` viaja aparte de las listas de arriba: no es un
+    inbox de Chatwoot que se pueda consultar por API, es el link de
+    `vincular.lavendi.mx/<token>` (panel de Evolution API, fuera de este
+    proyecto — ver `/srv/equipo/whatsapp-bridge/`) que ya existía para dar de
+    alta el WhatsApp Business normal del cliente (QR o número+código), guardado
+    a mano en `Chatwoot Settings.whatsapp_vinculacion_url` por quien hizo el
+    onboarding. Antes de esto el link solo se entregaba por fuera (WhatsApp/
+    email) y no se podía volver a consultar dentro del CRM."""
     _exigir_admin()
     inboxes = cw.list_inboxes()
     sitio = set(_inboxes_del_sitio())
     return {
+        "whatsapp_vinculacion_url": (
+            frappe.get_cached_doc("Chatwoot Settings").get("whatsapp_vinculacion_url") or ""
+        ).strip(),
         "facebook": [
             {"id": i.get("id"), "name": i.get("name")}
             for i in inboxes
